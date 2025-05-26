@@ -1,3 +1,4 @@
+#include "volk.h"
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -21,7 +22,8 @@ const std::vector<const char*> validationLayers = {
 };
 
 const std::vector<const char*> deviceExtensions = {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    VK_EXT_SHADER_OBJECT_EXTENSION_NAME
 };
 
 #ifdef NDEBUG
@@ -64,6 +66,7 @@ struct SwapChainSupportDetails {
 class HelloTriangleApplication {
 public:
     void run() {
+        volkInitialize();
         initWindow();
         initVulkan();
         mainLoop();
@@ -88,6 +91,9 @@ private:
     VkFormat swapChainImageFormat;
     VkExtent2D swapChainExtent;
     std::vector<VkImageView> swapChainImageViews;
+
+    VkShaderEXT vertShader;
+    VkShaderEXT fragShader;
 
     void initWindow() {
         glfwInit();
@@ -120,6 +126,9 @@ private:
             vkDestroyImageView(device, imageView, nullptr);
         }
 
+        vkDestroyShaderEXT(device, fragShader, nullptr);
+        vkDestroyShaderEXT(device, vertShader, nullptr);
+
         vkDestroySwapchainKHR(device, swapChain, nullptr);
         vkDestroyDevice(device, nullptr);
 
@@ -146,7 +155,7 @@ private:
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = VK_API_VERSION_1_0;
+        appInfo.apiVersion = VK_API_VERSION_1_3;
 
         VkInstanceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -172,6 +181,8 @@ private:
         if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS) {
             throw std::runtime_error("failed to create instance!");
         }
+
+        volkLoadInstance(instance);
     }
 
     void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
@@ -238,7 +249,14 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        VkPhysicalDeviceFeatures deviceFeatures{};
+        VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{};
+        shaderObjectFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT;
+        shaderObjectFeatures.pNext = nullptr;
+        shaderObjectFeatures.shaderObject = VK_TRUE;
+
+        VkPhysicalDeviceFeatures2 deviceFeatures2{};
+        deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        deviceFeatures2.pNext = &shaderObjectFeatures;
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -246,7 +264,7 @@ private:
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
 
-        createInfo.pEnabledFeatures = &deviceFeatures;
+        createInfo.pNext = &deviceFeatures2;
 
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
@@ -348,40 +366,32 @@ private:
         auto vertShaderCode = readFile("shaders/vert.spv");
         auto fragShaderCode = readFile("shaders/frag.spv");
 
-        VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
-        VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+        VkShaderCreateInfoEXT vertShaderCreateInfo{ VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT };
+        vertShaderCreateInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+        vertShaderCreateInfo.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT;
+        vertShaderCreateInfo.pCode = reinterpret_cast<const uint32_t*>(vertShaderCode.data());
+        vertShaderCreateInfo.codeSize = vertShaderCode.size();
+        vertShaderCreateInfo.pName = "main";
 
-        VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
-        vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-        vertShaderStageInfo.module = vertShaderModule;
-        vertShaderStageInfo.pName = "main";
+        VkShaderCreateInfoEXT fragShaderCreateInfo{ VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT };
+        fragShaderCreateInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        fragShaderCreateInfo.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT;
+        fragShaderCreateInfo.pCode = reinterpret_cast<const uint32_t*>(fragShaderCode.data());
+        fragShaderCreateInfo.codeSize = fragShaderCode.size();
+        fragShaderCreateInfo.pName = "main";
 
-        VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
-        fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        fragShaderStageInfo.module = fragShaderModule;
-        fragShaderStageInfo.pName = "main";
-
-        VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
-
-        vkDestroyShaderModule(device, fragShaderModule, nullptr);
-        vkDestroyShaderModule(device, vertShaderModule, nullptr);
-    }
-
-    VkShaderModule createShaderModule(const std::vector<char>& code) {
-        VkShaderModuleCreateInfo createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        createInfo.codeSize = code.size();
-        createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
-        VkShaderModule shaderModule;
-        if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create shader module!");
+        VkShaderEXT shaders[2];
+        VkShaderCreateInfoEXT shaderCreateInfos[] = {vertShaderCreateInfo, fragShaderCreateInfo};
+        if (vkCreateShadersEXT(device, 2,
+            shaderCreateInfos,
+            nullptr, shaders) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create shader objects!");
         }
-
-        return shaderModule;
+        
+        vertShader = shaders[0];
+        fragShader = shaders[1];       
     }
+
 
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
         for (const auto& availableFormat : availableFormats) {
