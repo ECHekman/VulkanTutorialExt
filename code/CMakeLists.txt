@@ -6,6 +6,7 @@ find_package (glfw3 REQUIRED)
 find_package (glm REQUIRED)
 find_package (Vulkan REQUIRED)
 find_package (tinyobjloader REQUIRED)
+find_package (volk REQUIRED)
 
 find_package (PkgConfig)
 pkg_get_variable (STB_INCLUDEDIR stb includedir)
@@ -54,7 +55,7 @@ function (add_chapter CHAPTER_NAME)
   set_target_properties (${CHAPTER_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CHAPTER_NAME})
   set_target_properties (${CHAPTER_NAME} PROPERTIES CXX_STANDARD 17)
-  target_link_libraries (${CHAPTER_NAME} Vulkan::Vulkan glfw)
+  target_link_libraries (${CHAPTER_NAME} Vulkan::Vulkan glfw volk::volk)
   target_include_directories (${CHAPTER_NAME} PRIVATE ${STB_INCLUDEDIR})
 
   if (DEFINED CHAPTER_SHADER)

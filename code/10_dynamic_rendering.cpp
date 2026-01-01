@@ -23,7 +23,8 @@ const std::vector<const char*> validationLayers = {
 
 const std::vector<const char*> deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-    VK_EXT_SHADER_OBJECT_EXTENSION_NAME
+    VK_EXT_SHADER_OBJECT_EXTENSION_NAME,
+    VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
 };
 
 #ifdef NDEBUG
@@ -249,14 +250,15 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{};
-        shaderObjectFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT;
-        shaderObjectFeatures.pNext = nullptr;
-        shaderObjectFeatures.shaderObject = VK_TRUE;
+        VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeature{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES };
+        dynamicRenderingFeature.dynamicRendering = VK_TRUE;
 
-        VkPhysicalDeviceFeatures2 deviceFeatures2{};
-        deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        deviceFeatures2.pNext = &shaderObjectFeatures;
+        VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeature { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT };
+        shaderObjectFeature.pNext = &dynamicRenderingFeature;
+        shaderObjectFeature.shaderObject = VK_TRUE;
+
+        VkPhysicalDeviceFeatures2 deviceFeatures2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+        deviceFeatures2.pNext = &shaderObjectFeature;
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -366,30 +368,30 @@ private:
         auto vertShaderCode = readFile("shaders/vert.spv");
         auto fragShaderCode = readFile("shaders/frag.spv");
 
-        VkShaderCreateInfoEXT vertShaderCreateInfo{ VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT };
-        vertShaderCreateInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-        vertShaderCreateInfo.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT;
-        vertShaderCreateInfo.pCode = reinterpret_cast<const uint32_t*>(vertShaderCode.data());
-        vertShaderCreateInfo.codeSize = vertShaderCode.size();
-        vertShaderCreateInfo.pName = "main";
+        vertShader = createShaderObject(vertShaderCode, VK_SHADER_STAGE_VERTEX_BIT);
+        fragShader = createShaderObject(fragShaderCode, VK_SHADER_STAGE_FRAGMENT_BIT);
 
-        VkShaderCreateInfoEXT fragShaderCreateInfo{ VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT };
-        fragShaderCreateInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        fragShaderCreateInfo.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT;
-        fragShaderCreateInfo.pCode = reinterpret_cast<const uint32_t*>(fragShaderCode.data());
-        fragShaderCreateInfo.codeSize = fragShaderCode.size();
-        fragShaderCreateInfo.pName = "main";
 
-        VkShaderEXT shaders[2];
-        VkShaderCreateInfoEXT shaderCreateInfos[] = {vertShaderCreateInfo, fragShaderCreateInfo};
-        if (vkCreateShadersEXT(device, 2,
-            shaderCreateInfos,
-            nullptr, shaders) != VK_SUCCESS) {
+
+    }
+
+
+    VkShaderEXT createShaderObject(const std::vector<char>& code, VkShaderStageFlagBits stageFlags) {
+        VkShaderCreateInfoEXT shaderCreateInfo{ VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT };
+        shaderCreateInfo.stage = stageFlags;
+        shaderCreateInfo.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT;
+        shaderCreateInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+        shaderCreateInfo.codeSize = code.size();
+        shaderCreateInfo.pName = "main";
+
+        VkShaderEXT shader;
+        if (vkCreateShadersEXT(device, 1,
+            &shaderCreateInfo,
+            nullptr, &shader) != VK_SUCCESS) {
             throw std::runtime_error("failed to create shader objects!");
         }
-        
-        vertShader = shaders[0];
-        fragShader = shaders[1];       
+
+        return shader;
     }
 
 

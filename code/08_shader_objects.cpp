@@ -1,7 +1,9 @@
+#include "volk.h"
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
 #include <algorithm>
 #include <vector>
@@ -20,7 +22,8 @@ const std::vector<const char*> validationLayers = {
 };
 
 const std::vector<const char*> deviceExtensions = {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    VK_EXT_SHADER_OBJECT_EXTENSION_NAME
 };
 
 #ifdef NDEBUG
@@ -63,6 +66,7 @@ struct SwapChainSupportDetails {
 class HelloTriangleApplication {
 public:
     void run() {
+        volkInitialize();
         initWindow();
         initVulkan();
         mainLoop();
@@ -87,6 +91,9 @@ private:
     VkFormat swapChainImageFormat;
     VkExtent2D swapChainExtent;
     std::vector<VkImageView> swapChainImageViews;
+
+    VkShaderEXT vertShader;
+    VkShaderEXT fragShader;
 
     void initWindow() {
         glfwInit();
@@ -119,6 +126,9 @@ private:
             vkDestroyImageView(device, imageView, nullptr);
         }
 
+        vkDestroyShaderEXT(device, fragShader, nullptr);
+        vkDestroyShaderEXT(device, vertShader, nullptr);
+
         vkDestroySwapchainKHR(device, swapChain, nullptr);
         vkDestroyDevice(device, nullptr);
 
@@ -145,7 +155,7 @@ private:
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = VK_API_VERSION_1_0;
+        appInfo.apiVersion = VK_API_VERSION_1_3;
 
         VkInstanceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -171,6 +181,8 @@ private:
         if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS) {
             throw std::runtime_error("failed to create instance!");
         }
+
+        volkLoadInstance(instance);
     }
 
     void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
@@ -237,7 +249,14 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        VkPhysicalDeviceFeatures deviceFeatures{};
+        VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{};
+        shaderObjectFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT;
+        shaderObjectFeatures.pNext = nullptr;
+        shaderObjectFeatures.shaderObject = VK_TRUE;
+
+        VkPhysicalDeviceFeatures2 deviceFeatures2{};
+        deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        deviceFeatures2.pNext = &shaderObjectFeatures;
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -245,7 +264,7 @@ private:
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
 
-        createInfo.pEnabledFeatures = &deviceFeatures;
+        createInfo.pNext = &deviceFeatures2;
 
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
@@ -344,8 +363,34 @@ private:
     }
 
     void createGraphicsPipeline() {
+        auto vertShaderCode = readFile("shaders/vert.spv");
+        auto fragShaderCode = readFile("shaders/frag.spv");
+
+        vertShader = createShaderObject(vertShaderCode, VK_SHADER_STAGE_VERTEX_BIT);
+        fragShader = createShaderObject(fragShaderCode, VK_SHADER_STAGE_FRAGMENT_BIT);
+
 
     }
+
+
+    VkShaderEXT createShaderObject(const std::vector<char>& code, VkShaderStageFlagBits stageFlags) {
+        VkShaderCreateInfoEXT shaderCreateInfo{ VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT };
+        shaderCreateInfo.stage = stageFlags;
+        shaderCreateInfo.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT;
+        shaderCreateInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+        shaderCreateInfo.codeSize = code.size();
+        shaderCreateInfo.pName = "main";
+
+        VkShaderEXT shader;
+        if (vkCreateShadersEXT(device, 1,
+            &shaderCreateInfo,
+            nullptr, &shader) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create shader objects!");
+        }
+
+        return shader;
+    }
+
 
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
         for (const auto& availableFormat : availableFormats) {
@@ -509,6 +554,24 @@ private:
         }
 
         return true;
+    }
+
+    static std::vector<char> readFile(const std::string& filename) {
+        std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+        if (!file.is_open()) {
+            throw std::runtime_error("failed to open file!");
+        }
+
+        size_t fileSize = (size_t) file.tellg();
+        std::vector<char> buffer(fileSize);
+
+        file.seekg(0);
+        file.read(buffer.data(), fileSize);
+
+        file.close();
+
+        return buffer;
     }
 
     static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
