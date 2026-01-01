@@ -55,7 +55,7 @@ function (add_chapter CHAPTER_NAME)
   set_target_properties (${CHAPTER_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CHAPTER_NAME})
   set_target_properties (${CHAPTER_NAME} PROPERTIES CXX_STANDARD 17)
-  target_link_libraries (${CHAPTER_NAME} Vulkan::Vulkan glfw volk::volk)
+  target_link_libraries (${CHAPTER_NAME} glfw volk::volk)
   target_include_directories (${CHAPTER_NAME} PRIVATE ${STB_INCLUDEDIR})
 
   if (DEFINED CHAPTER_SHADER)
@@ -91,34 +91,35 @@ add_chapter (06_swap_chain_creation)
 
 add_chapter (07_image_views)
 
-add_chapter (08_graphics_pipeline)
+add_chapter (08_shader_objects
+  SHADER 08_shader_base)
 
-add_chapter (09_shader_modules
-  SHADER 09_shader_base)
+add_chapter (09_command_buffers
+  SHADER 08_shader_base)
 
-add_chapter (10_fixed_functions
-  SHADER 09_shader_base)
+add_chapter (10_dynamic_rendering
+  SHADER 08_shader_base)
 
 add_chapter (11_render_passes
-  SHADER 09_shader_base)
+  SHADER 08_shader_base)
 
 add_chapter (12_graphics_pipeline_complete
-  SHADER 09_shader_base)
+  SHADER 08_shader_base)
 
 add_chapter (13_framebuffers
-  SHADER 09_shader_base)
+  SHADER 08_shader_base)
 
 add_chapter (14_command_buffers
-  SHADER 09_shader_base)
+  SHADER 08_shader_base)
 
 add_chapter (15_hello_triangle
-  SHADER 09_shader_base)
+  SHADER 08_shader_base)
 
 add_chapter (16_frames_in_flight
-  SHADER 09_shader_base)
+  SHADER 08_shader_base)
 
 add_chapter (17_swap_chain_recreation
-  SHADER 09_shader_base)
+  SHADER 08_shader_base)
 
 add_chapter (18_vertex_input
   SHADER 18_shader_vertexbuffer
