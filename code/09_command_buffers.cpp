@@ -23,7 +23,8 @@ const std::vector<const char*> validationLayers = {
 
 const std::vector<const char*> deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-    VK_EXT_SHADER_OBJECT_EXTENSION_NAME
+    VK_EXT_SHADER_OBJECT_EXTENSION_NAME,
+    VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME
 };
 
 #ifdef NDEBUG
@@ -96,6 +97,9 @@ private:
     VkShaderEXT vertShader;
     VkShaderEXT fragShader;
 
+    VkCommandPool commandPool;
+    VkCommandBuffer commandBuffer;
+
     void initWindow() {
         glfwInit();
 
@@ -114,6 +118,8 @@ private:
         createSwapChain();
         createImageViews();
         createGraphicsPipeline();
+        createCommandPool();
+        createCommandBuffer();
     }
 
     void mainLoop() {
@@ -123,6 +129,8 @@ private:
     }
 
     void cleanup() {
+        vkDestroyCommandPool(device, commandPool, nullptr);
+
         for (auto imageView : swapChainImageViews) {
             vkDestroyImageView(device, imageView, nullptr);
         }
@@ -251,9 +259,14 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
+        VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeatures{};
+        dynamicRenderingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
+        dynamicRenderingFeatures.pNext = nullptr;
+        dynamicRenderingFeatures.dynamicRendering = true;
+
         VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{};
         shaderObjectFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT;
-        shaderObjectFeatures.pNext = nullptr;
+        shaderObjectFeatures.pNext = &dynamicRenderingFeatures;
         shaderObjectFeatures.shaderObject = VK_TRUE;
 
         VkPhysicalDeviceFeatures2 deviceFeatures2{};
@@ -373,8 +386,99 @@ private:
         vertShader = createShaderObject(vertShaderCode, VK_SHADER_STAGE_VERTEX_BIT);
         fragShader = createShaderObject(fragShaderCode, VK_SHADER_STAGE_FRAGMENT_BIT);
 
+        /*
+        // Provide information for dynamic rendering
+        VkPipelineRenderingCreateInfoKHR pipeline_create{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+        pipeline_create.pNext = VK_NULL_HANDLE;
+        pipeline_create.colorAttachmentCount = 1;
+        pipeline_create.pColorAttachmentFormats = &color_rendering_format;
+        pipeline_create.depthAttachmentFormat = depth_format;
+        pipeline_create.stencilAttachmentFormat = depth_format;
 
+        // Use the pNext to point to the rendering create struct
+        VkGraphicsPipelineCreateInfo graphics_create{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+        graphics_create.pNext = &pipeline_create; // reference the new dynamic structure
+        graphics_create.renderPass = VK_NULL_HANDLE; // previously required non-null
+        */
     }
+
+
+    void createCommandPool() {
+        QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
+
+        VkCommandPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
+
+        if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create command pool!");
+        }
+    }
+
+
+    void createCommandBuffer()
+    {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = commandPool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+
+        if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate command buffers!");
+        }
+    }
+
+
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = 0; // Optional
+        beginInfo.pInheritanceInfo = nullptr; // Optional
+
+        if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+            throw std::runtime_error("failed to begin recording command buffer!");
+        }
+
+        // swap chain color attachment?
+        //transitionToColorAttachment(commandBuffer, swapchainImages[imageIndex]);
+
+        VkRenderingAttachmentInfo colorAttachment{};
+        colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        colorAttachment.imageView = swapChainImageViews[imageIndex];
+        colorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachment.clearValue = { 0.0f, 0.0f, 0.0f, 1.0f };
+
+        VkRenderingInfo renderingInfo{};
+        renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        renderingInfo.renderArea = { {0, 0}, swapChainExtent };
+        renderingInfo.layerCount = 1;
+        renderingInfo.colorAttachmentCount = 1;
+        renderingInfo.pColorAttachments = &colorAttachment;
+
+        vkCmdBeginRendering(commandBuffer, &renderingInfo);
+        {
+            // --- bind shader objects (NO pipeline) ---
+            VkShaderStageFlagBits stages[] = {
+                VK_SHADER_STAGE_VERTEX_BIT,
+                VK_SHADER_STAGE_FRAGMENT_BIT
+            };
+
+            VkShaderEXT shaders[] = {
+                vertShader,
+                fragShader
+            };
+
+            vkCmdBindShadersEXT(commandBuffer, 2, stages, shaders);
+
+        }
+        vkCmdEndRendering(commandBuffer);
+
+
+    };
 
 
     VkShaderEXT createShaderObject(const std::vector<char>& code, VkShaderStageFlagBits stageFlags) {
