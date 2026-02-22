@@ -24,7 +24,8 @@ const std::vector<const char*> validationLayers = {
 const std::vector<const char*> deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     VK_EXT_SHADER_OBJECT_EXTENSION_NAME,
-    VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME
+    VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+    VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
 };
 
 #ifdef NDEBUG
@@ -99,6 +100,11 @@ private:
 
     VkCommandPool commandPool;
     VkCommandBuffer commandBuffer;
+    
+    VkSemaphore imageAvailableSemaphore;
+    VkSemaphore renderFinishedSemaphore;
+    VkSemaphore timelineSemaphore;
+    uint64_t frameValue = 0;
 
     void initWindow() {
         glfwInit();
@@ -120,15 +126,20 @@ private:
         createGraphicsPipeline();
         createCommandPool();
         createCommandBuffer();
+        createSyncObjects();
     }
 
     void mainLoop() {
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
+
+            drawFrame();
         }
     }
 
     void cleanup() {
+        vkDestroySemaphore(device, timelineSemaphore, nullptr);
+
         vkDestroyCommandPool(device, commandPool, nullptr);
 
         for (auto imageView : swapChainImageViews) {
@@ -259,19 +270,25 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeatures{};
-        dynamicRenderingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
-        dynamicRenderingFeatures.pNext = nullptr;
-        dynamicRenderingFeatures.dynamicRendering = true;
-
         VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{};
         shaderObjectFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT;
-        shaderObjectFeatures.pNext = &dynamicRenderingFeatures;
+        shaderObjectFeatures.pNext = nullptr;
         shaderObjectFeatures.shaderObject = VK_TRUE;
 
         VkPhysicalDeviceFeatures2 deviceFeatures2{};
         deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
         deviceFeatures2.pNext = &shaderObjectFeatures;
+
+        VkPhysicalDeviceVulkan12Features vulkan12Features{};
+        vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        vulkan12Features.timelineSemaphore = VK_TRUE;
+        vulkan12Features.pNext = &deviceFeatures2;
+
+        VkPhysicalDeviceVulkan13Features vulkan13Features{};
+        vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+        vulkan13Features.synchronization2 = VK_TRUE;
+        vulkan13Features.dynamicRendering = VK_TRUE;
+        vulkan13Features.pNext = &vulkan12Features;
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -279,7 +296,7 @@ private:
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
 
-        createInfo.pNext = &deviceFeatures2;
+        createInfo.pNext = &vulkan13Features;
 
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
@@ -385,21 +402,7 @@ private:
 
         vertShader = createShaderObject(vertShaderCode, VK_SHADER_STAGE_VERTEX_BIT);
         fragShader = createShaderObject(fragShaderCode, VK_SHADER_STAGE_FRAGMENT_BIT);
-
-        /*
-        // Provide information for dynamic rendering
-        VkPipelineRenderingCreateInfoKHR pipeline_create{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
-        pipeline_create.pNext = VK_NULL_HANDLE;
-        pipeline_create.colorAttachmentCount = 1;
-        pipeline_create.pColorAttachmentFormats = &color_rendering_format;
-        pipeline_create.depthAttachmentFormat = depth_format;
-        pipeline_create.stencilAttachmentFormat = depth_format;
-
-        // Use the pNext to point to the rendering create struct
-        VkGraphicsPipelineCreateInfo graphics_create{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
-        graphics_create.pNext = &pipeline_create; // reference the new dynamic structure
-        graphics_create.renderPass = VK_NULL_HANDLE; // previously required non-null
-        */
+        return;
     }
 
 
@@ -481,6 +484,27 @@ private:
 
         vkCmdBeginRendering(commandBuffer, &renderingInfo);
         {
+            vkCmdSetCullModeEXT(commandBuffer, VK_CULL_MODE_NONE);
+            vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+            vkCmdSetPolygonModeEXT(commandBuffer, VK_POLYGON_MODE_FILL);
+            vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE);
+            vkCmdSetDepthBiasEnable(commandBuffer, VK_FALSE);
+            vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+            vkCmdSetPrimitiveRestartEnableEXT(commandBuffer, VK_FALSE);
+            vkCmdSetRasterizationSamplesEXT(commandBuffer, VK_SAMPLE_COUNT_1_BIT);
+            vkCmdSetDepthTestEnable(commandBuffer, VK_TRUE);
+            vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_GREATER);
+            vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE);
+            vkCmdSetRasterizerDiscardEnableEXT(commandBuffer, VK_FALSE);
+            const VkSampleMask sample_mask = 0x1;
+            vkCmdSetSampleMaskEXT(commandBuffer, VK_SAMPLE_COUNT_1_BIT, &sample_mask);
+            vkCmdSetAlphaToCoverageEnableEXT(commandBuffer, VK_FALSE);
+            VkColorComponentFlags color_component_flags[] = { VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_A_BIT };
+            vkCmdSetColorWriteMaskEXT(commandBuffer, 0, 1, color_component_flags);
+            VkBool32 color_blend_enables[] = { VK_FALSE };
+            vkCmdSetColorBlendEnableEXT(commandBuffer, 0, 1, color_blend_enables);
+            vkCmdSetVertexInputEXT(commandBuffer, 0, nullptr, 0, nullptr );
+
             // --- bind shader objects (NO pipeline) ---
             VkShaderStageFlagBits stages[] = {
                 VK_SHADER_STAGE_VERTEX_BIT,
@@ -501,22 +525,150 @@ private:
             viewport.height = (float)swapChainExtent.height;
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
-            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+            vkCmdSetViewportWithCount(commandBuffer, 1, &viewport);
 
             VkRect2D scissor{};
             scissor.offset = { 0, 0 };
             scissor.extent = swapChainExtent;
-            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+            vkCmdSetScissorWithCount(commandBuffer, 1, &scissor);
 
             vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
         }
         vkCmdEndRendering(commandBuffer);
 
+        VkImageMemoryBarrier2 barrierLayoutBack{};
+        barrierLayoutBack.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        barrierLayoutBack.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        barrierLayoutBack.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        barrierLayoutBack.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+        barrierLayoutBack.dstAccessMask = 0;
+        barrierLayoutBack.oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+        barrierLayoutBack.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        barrierLayoutBack.image = swapChainImages[imageIndex];
+        barrierLayoutBack.subresourceRange = {
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            0, 1, 0, 1
+        };
+
+        VkDependencyInfo depLayoutBack{};
+        depLayoutBack.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        depLayoutBack.imageMemoryBarrierCount = 1;
+        depLayoutBack.pImageMemoryBarriers = &barrierLayoutBack;
+
+        vkCmdPipelineBarrier2(commandBuffer, &depLayoutBack);
+
+
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to record command buffer!");
         }
     };
+
+    void createSyncObjects() {
+
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
+            vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create synchronization objects for a frame!");
+        }
+
+        VkSemaphoreTypeCreateInfo typeInfo{};
+        typeInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+        typeInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+        typeInfo.initialValue = 0;
+
+        VkSemaphoreCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        createInfo.pNext = &typeInfo;
+
+        if (vkCreateSemaphore(device, &createInfo, nullptr, &timelineSemaphore) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create timeline synchronization objects for a frame!");
+        }
+    }
+
+    void drawFrame() {
+
+        VkSemaphoreWaitInfo waitInfo{};
+        waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+        waitInfo.semaphoreCount = 1;
+        waitInfo.pSemaphores = &timelineSemaphore;
+
+        uint64_t waitValue = frameValue;
+        waitInfo.pValues = &waitValue;
+
+        vkWaitSemaphores(device, &waitInfo, UINT64_MAX);
+
+        uint32_t imageIndex;
+        vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+        frameValue++;
+
+        vkResetCommandBuffer(commandBuffer, /*VkCommandBufferResetFlagBits*/ 0);
+        recordCommandBuffer(commandBuffer, imageIndex);
+
+        VkSemaphoreSubmitInfo waitAcquire{};
+        waitAcquire.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        waitAcquire.semaphore = imageAvailableSemaphore;
+        waitAcquire.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        
+        VkSemaphoreSubmitInfo signalBinary{};
+        signalBinary.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        signalBinary.semaphore = renderFinishedSemaphore;
+        signalBinary.stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+
+        VkSemaphoreSubmitInfo waitSemaphoreInfo{};
+        waitSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        waitSemaphoreInfo.semaphore = timelineSemaphore;
+        waitSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        waitSemaphoreInfo.deviceIndex = 0;
+        waitSemaphoreInfo.value = frameValue - 1;;
+
+        VkSemaphoreSubmitInfo signalSemaphoreInfo{};
+        signalSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        signalSemaphoreInfo.semaphore = timelineSemaphore;
+        signalSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+        signalSemaphoreInfo.deviceIndex = 0;
+        signalSemaphoreInfo.value = frameValue;
+
+        VkSemaphoreSubmitInfo waits[] = { waitAcquire, waitSemaphoreInfo };
+        VkSemaphoreSubmitInfo signals[] = { signalSemaphoreInfo, signalBinary };
+
+        VkCommandBufferSubmitInfo commandBufferInfo{};
+        commandBufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+        commandBufferInfo.commandBuffer = commandBuffer;
+        commandBufferInfo.deviceMask = 0;
+
+        VkSubmitInfo2 submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+
+        submitInfo.waitSemaphoreInfoCount = 2;
+        submitInfo.pWaitSemaphoreInfos = waits;
+
+        submitInfo.commandBufferInfoCount = 1;
+        submitInfo.pCommandBufferInfos = &commandBufferInfo;
+        
+        submitInfo.signalSemaphoreInfoCount = 2;
+        submitInfo.pSignalSemaphoreInfos = signals;
+        
+        if (vkQueueSubmit2(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
+            throw std::runtime_error("failed to submit draw command buffer!");
+        }
+
+        VkPresentInfoKHR presentInfo{};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = &renderFinishedSemaphore;
+
+        VkSwapchainKHR swapChains[] = { swapChain };
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = swapChains;
+        presentInfo.pImageIndices = &imageIndex;
+
+        vkQueuePresentKHR(presentQueue, &presentInfo);
+    }
 
 
     VkShaderEXT createShaderObject(const std::vector<char>& code, VkShaderStageFlagBits stageFlags) {
@@ -526,7 +678,7 @@ private:
         shaderCreateInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
         shaderCreateInfo.codeSize = code.size();
         shaderCreateInfo.pName = "main";
-
+        
         VkShaderEXT shader;
         if (vkCreateShadersEXT(device, 1,
             &shaderCreateInfo,
