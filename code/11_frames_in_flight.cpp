@@ -106,7 +106,7 @@ private:
     std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
     VkSemaphore timelineSemaphore;
-    uint64_t frameValue = 0;
+    uint64_t timelineValue = 0;
     uint32_t currentFrame = 0;
 
     void initWindow() {
@@ -429,8 +429,9 @@ private:
     }
 
 
-    void createCommandBuffers()
-    {
+    void createCommandBuffers() {
+        commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.commandPool = commandPool;
@@ -444,8 +445,7 @@ private:
 
 
 
-    void setInitialRenderingState(VkCommandBuffer commandBuffer)
-    {
+    void setInitialRenderingState(VkCommandBuffer commandBuffer) {
         vkCmdSetCullModeEXT(commandBuffer, VK_CULL_MODE_NONE);
         vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
         vkCmdSetPolygonModeEXT(commandBuffer, VK_POLYGON_MODE_FILL);
@@ -580,9 +580,12 @@ private:
     };
 
     void createSyncObjects() {
-
+        // Create semaphores
         VkSemaphoreCreateInfo semaphoreInfo{};
         semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
@@ -591,6 +594,7 @@ private:
 
         }
 
+        // Create timeline semaphore
         VkSemaphoreTypeCreateInfo typeInfo{};
         typeInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
         typeInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
@@ -608,19 +612,22 @@ private:
 
     void drawFrame() {
 
-        VkSemaphoreWaitInfo waitInfo{};
-        waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-        waitInfo.semaphoreCount = 1;
-        waitInfo.pSemaphores = &timelineSemaphore;
+        if (timelineValue >= MAX_FRAMES_IN_FLIGHT)
+        {
+            VkSemaphoreWaitInfo waitInfo{};
+            waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+            waitInfo.semaphoreCount = 1;
+            waitInfo.pSemaphores = &timelineSemaphore;
 
-        uint64_t waitValue = frameValue;
-        waitInfo.pValues = &waitValue;
+            uint64_t waitValue = timelineValue;
+            waitInfo.pValues = &waitValue;
 
-        vkWaitSemaphores(device, &waitInfo, UINT64_MAX);
+            vkWaitSemaphores(device, &waitInfo, UINT64_MAX);
+        }
 
         uint32_t imageIndex;
         vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
-        frameValue++;
+        timelineValue++;
 
         vkResetCommandBuffer(commandBuffers[currentFrame], /*VkCommandBufferResetFlagBits*/ 0);
         recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
@@ -629,33 +636,35 @@ private:
         waitAcquire.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
         waitAcquire.semaphore = imageAvailableSemaphores[currentFrame];
         waitAcquire.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        
-        VkSemaphoreSubmitInfo signalBinary{};
-        signalBinary.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-        signalBinary.semaphore = renderFinishedSemaphores[currentFrame];
-        signalBinary.stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
 
         VkSemaphoreSubmitInfo waitSemaphoreInfo{};
         waitSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
         waitSemaphoreInfo.semaphore = timelineSemaphore;
         waitSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
         waitSemaphoreInfo.deviceIndex = 0;
-        waitSemaphoreInfo.value = frameValue - MAX_FRAMES_IN_FLIGHT + 1;
+        waitSemaphoreInfo.value = timelineValue - 1;
+
+        VkSemaphoreSubmitInfo waits[] = { waitAcquire, waitSemaphoreInfo };
+
+        VkSemaphoreSubmitInfo signalBinary{};
+        signalBinary.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        signalBinary.semaphore = renderFinishedSemaphores[currentFrame];
+        signalBinary.stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
 
         VkSemaphoreSubmitInfo signalSemaphoreInfo{};
         signalSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
         signalSemaphoreInfo.semaphore = timelineSemaphore;
         signalSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
         signalSemaphoreInfo.deviceIndex = 0;
-        signalSemaphoreInfo.value = frameValue;
+        signalSemaphoreInfo.value = timelineValue;
 
-        VkSemaphoreSubmitInfo waits[] = { waitAcquire, waitSemaphoreInfo };
         VkSemaphoreSubmitInfo signals[] = { signalSemaphoreInfo, signalBinary };
 
         VkCommandBufferSubmitInfo commandBufferInfo{};
         commandBufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
         commandBufferInfo.commandBuffer = commandBuffers[currentFrame];
         commandBufferInfo.deviceMask = 0;
+
 
         VkSubmitInfo2 submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
@@ -672,6 +681,7 @@ private:
         if (vkQueueSubmit2(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
             throw std::runtime_error("failed to submit draw command buffer!");
         }
+
 
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
