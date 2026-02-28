@@ -39,7 +39,7 @@ function (add_shaders_target TARGET)
   add_custom_command (
     OUTPUT ${SHADERS}
     COMMAND glslang::validator
-    ARGS --target-env vulkan1.0 ${SHADER_SOURCES} --quiet
+    ARGS --target-env vulkan1.0 ${SHADER_SOURCES}
     WORKING_DIRECTORY ${SHADERS_DIR}
     DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
     COMMENT "Compiling Shaders"
@@ -75,6 +75,8 @@ function (add_chapter CHAPTER_NAME)
   if (DEFINED CHAPTER_TEXTURES)
     file (COPY ${CHAPTER_TEXTURES} DESTINATION ${CMAKE_BINARY_DIR}/${CHAPTER_NAME}/textures)
   endif ()
+
+
 endfunction ()
 
 add_chapter (00_base_code)
@@ -102,17 +104,14 @@ add_chapter (09_command_buffers
 add_chapter (10_dynamic_rendering
   SHADER 08_shader_base)
 
-add_chapter (11_render_passes
+add_chapter (11_frames_in_flight
   SHADER 08_shader_base)
 
-add_chapter (12_graphics_pipeline_complete
+add_chapter (12_swap_chain_recreation
   SHADER 08_shader_base)
 
-add_chapter (13_framebuffers
-  SHADER 08_shader_base)
-
-add_chapter (14_command_buffers
-  SHADER 08_shader_base)
+add_chapter (13_vertex_input
+  SHADER 13_shader_vertexbuffer)
 
 add_chapter (15_hello_triangle
   SHADER 08_shader_base)
