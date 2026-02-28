@@ -434,6 +434,32 @@ private:
     }
 
 
+
+    void setInitialRenderingState(VkCommandBuffer commandBuffer)
+    {
+        vkCmdSetCullModeEXT(commandBuffer, VK_CULL_MODE_NONE);
+        vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+        vkCmdSetPolygonModeEXT(commandBuffer, VK_POLYGON_MODE_FILL);
+        vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE);
+        vkCmdSetDepthBiasEnable(commandBuffer, VK_FALSE);
+        vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+        vkCmdSetPrimitiveRestartEnableEXT(commandBuffer, VK_FALSE);
+        vkCmdSetRasterizationSamplesEXT(commandBuffer, VK_SAMPLE_COUNT_1_BIT);
+        vkCmdSetDepthTestEnable(commandBuffer, VK_TRUE);
+        vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_GREATER);
+        vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE);
+        vkCmdSetRasterizerDiscardEnableEXT(commandBuffer, VK_FALSE);
+        const VkSampleMask sample_mask = 0x1;
+        vkCmdSetSampleMaskEXT(commandBuffer, VK_SAMPLE_COUNT_1_BIT, &sample_mask);
+        vkCmdSetAlphaToCoverageEnableEXT(commandBuffer, VK_FALSE);
+        VkColorComponentFlags color_component_flags[] = { VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_A_BIT };
+        vkCmdSetColorWriteMaskEXT(commandBuffer, 0, 1, color_component_flags);
+        VkBool32 color_blend_enables[] = { VK_FALSE };
+        vkCmdSetColorBlendEnableEXT(commandBuffer, 0, 1, color_blend_enables);
+        vkCmdSetVertexInputEXT(commandBuffer, 0, nullptr, 0, nullptr);
+    }
+
+
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -484,28 +510,8 @@ private:
 
         vkCmdBeginRendering(commandBuffer, &renderingInfo);
         {
-            vkCmdSetCullModeEXT(commandBuffer, VK_CULL_MODE_NONE);
-            vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
-            vkCmdSetPolygonModeEXT(commandBuffer, VK_POLYGON_MODE_FILL);
-            vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE);
-            vkCmdSetDepthBiasEnable(commandBuffer, VK_FALSE);
-            vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-            vkCmdSetPrimitiveRestartEnableEXT(commandBuffer, VK_FALSE);
-            vkCmdSetRasterizationSamplesEXT(commandBuffer, VK_SAMPLE_COUNT_1_BIT);
-            vkCmdSetDepthTestEnable(commandBuffer, VK_TRUE);
-            vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_GREATER);
-            vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE);
-            vkCmdSetRasterizerDiscardEnableEXT(commandBuffer, VK_FALSE);
-            const VkSampleMask sample_mask = 0x1;
-            vkCmdSetSampleMaskEXT(commandBuffer, VK_SAMPLE_COUNT_1_BIT, &sample_mask);
-            vkCmdSetAlphaToCoverageEnableEXT(commandBuffer, VK_FALSE);
-            VkColorComponentFlags color_component_flags[] = { VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_A_BIT };
-            vkCmdSetColorWriteMaskEXT(commandBuffer, 0, 1, color_component_flags);
-            VkBool32 color_blend_enables[] = { VK_FALSE };
-            vkCmdSetColorBlendEnableEXT(commandBuffer, 0, 1, color_blend_enables);
-            vkCmdSetVertexInputEXT(commandBuffer, 0, nullptr, 0, nullptr );
+            setInitialRenderingState(commandBuffer);
 
-            // --- bind shader objects (NO pipeline) ---
             VkShaderStageFlagBits stages[] = {
                 VK_SHADER_STAGE_VERTEX_BIT,
                 VK_SHADER_STAGE_FRAGMENT_BIT
