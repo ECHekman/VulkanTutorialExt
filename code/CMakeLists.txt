@@ -7,6 +7,7 @@ find_package (glm REQUIRED)
 find_package (Vulkan REQUIRED)
 find_package (tinyobjloader REQUIRED)
 find_package (volk REQUIRED)
+find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 
 find_package (PkgConfig)
 pkg_get_variable (STB_INCLUDEDIR stb includedir)
@@ -55,7 +56,8 @@ function (add_chapter CHAPTER_NAME)
   set_target_properties (${CHAPTER_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CHAPTER_NAME})
   set_target_properties (${CHAPTER_NAME} PROPERTIES CXX_STANDARD 17)
-  target_link_libraries (${CHAPTER_NAME} glfw volk::volk)
+  target_link_libraries (${CHAPTER_NAME} glfw volk::volk GPUOpen::VulkanMemoryAllocator)
+  
   target_include_directories (${CHAPTER_NAME} PRIVATE ${STB_INCLUDEDIR})
 
   set_target_properties(${CHAPTER_NAME} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/${CHAPTER_NAME} )
@@ -111,6 +113,9 @@ add_chapter (12_swap_chain_recreation
   SHADER 08_shader_base)
 
 add_chapter (13_vertex_input
+  SHADER 13_shader_vertexbuffer)
+
+add_chapter (14_vertex_buffer
   SHADER 13_shader_vertexbuffer)
 
 add_chapter (15_hello_triangle

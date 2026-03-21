@@ -35,7 +35,7 @@ fi
 
 # Install required packages
 echo "📥 Installing glfw3, glm, stb, volk, tinyobjloader..."
-./vcpkg install glfw3 glm stb volk tinyobjloader --triplet x64-windows
+./vcpkg install glfw3 glm stb volk tinyobjloader vulkan-memory-allocator --triplet x64-windows
 
 # === back to project and build ===
 cd "$OLDPWD"
