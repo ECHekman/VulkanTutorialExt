@@ -118,8 +118,11 @@ add_chapter (13_vertex_input
 add_chapter (14_vertex_buffer
   SHADER 13_shader_vertexbuffer)
 
-add_chapter (15_hello_triangle
-  SHADER 08_shader_base)
+add_chapter (15_staging_buffer
+  SHADER 13_shader_vertexbuffer)
+
+add_chapter (16_index_buffer
+  SHADER 13_shader_vertexbuffer)
 
 add_chapter (16_frames_in_flight
   SHADER 08_shader_base)
