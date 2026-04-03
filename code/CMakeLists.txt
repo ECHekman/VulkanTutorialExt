@@ -6,8 +6,22 @@ find_package (glfw3 REQUIRED)
 find_package (glm REQUIRED)
 find_package (Vulkan REQUIRED)
 find_package (tinyobjloader REQUIRED)
-find_package (volk REQUIRED)
-find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+
+# Volk
+if(NOT DEFINED ENV{VULKAN_SDK})
+    message(FATAL_ERROR "VULKAN_SDK environment variable is not set")
+endif()
+
+set(VULKAN_SDK $ENV{VULKAN_SDK})
+
+find_library(VOLK_LIB volk
+    PATHS ${VULKAN_SDK}/Lib ${VULKAN_SDK}/lib
+    NO_DEFAULT_PATH
+)
+
+if(NOT VOLK_LIB)
+    message(FATAL_ERROR "volk library not found in ${VULKAN_SDK}/Lib or lib")
+endif()
 
 find_package (PkgConfig)
 pkg_get_variable (STB_INCLUDEDIR stb includedir)
@@ -22,6 +36,8 @@ endif ()
 add_executable (glslang::validator IMPORTED)
 find_program (GLSLANG_VALIDATOR "glslangValidator" HINTS $ENV{VULKAN_SDK}/bin REQUIRED)
 set_property (TARGET glslang::validator PROPERTY IMPORTED_LOCATION "${GLSLANG_VALIDATOR}")
+
+
 
 function (add_shaders_target TARGET)
   cmake_parse_arguments ("SHADER" "" "CHAPTER_NAME" "SOURCES" ${ARGN})
@@ -56,8 +72,11 @@ function (add_chapter CHAPTER_NAME)
   set_target_properties (${CHAPTER_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CHAPTER_NAME})
   set_target_properties (${CHAPTER_NAME} PROPERTIES CXX_STANDARD 17)
-  target_link_libraries (${CHAPTER_NAME} glfw volk::volk GPUOpen::VulkanMemoryAllocator)
   
+  target_link_libraries (${CHAPTER_NAME} glfw Vulkan::Headers ${VOLK_LIB})
+  #target_link_libraries (${CHAPTER_NAME} PRIVATE )  
+
+
   target_include_directories (${CHAPTER_NAME} PRIVATE ${STB_INCLUDEDIR})
 
   set_target_properties(${CHAPTER_NAME} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/${CHAPTER_NAME} )
@@ -123,6 +142,9 @@ add_chapter (15_staging_buffer
 
 add_chapter (16_index_buffer
   SHADER 13_shader_vertexbuffer)
+
+add_chapter (17_descriptor_set_layout
+  SHADER 17_shader_ubo)
 
 add_chapter (16_frames_in_flight
   SHADER 08_shader_base)

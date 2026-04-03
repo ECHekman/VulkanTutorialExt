@@ -110,6 +110,12 @@ struct Vertex {
     }
 };
 
+struct UniformBufferObject {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
+};
+
 const std::vector<Vertex> vertices = {
     {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
     {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
@@ -162,6 +168,11 @@ private:
     VkBuffer indexBuffer;
     VmaAllocation indexAllocation;
 
+    VkBuffer uniformBuffer;
+    VmaAllocation uniformAllocation;
+
+    VkPhysicalDeviceDescriptorHeapPropertiesEXT heapProperties;
+
     std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
     VkSemaphore timelineSemaphore;
@@ -195,10 +206,12 @@ private:
         createVMA();
         createSwapChain();
         createImageViews();
+        createDescriptorHeap();
         createGraphicsPipeline();
         createCommandPool();
         createVertexBuffer();
         createIndexBuffer();
+        createUniformBuffer();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -225,6 +238,7 @@ private:
 
         vmaDestroyBuffer(allocator, vertexBuffer, vertexAllocation);
         vmaDestroyBuffer(allocator, indexBuffer, indexAllocation);
+        vmaDestroyBuffer(allocator, uniformBuffer, uniformAllocation);
         vmaDestroyAllocator(allocator);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
@@ -521,6 +535,13 @@ private:
         }
     }
 
+    void createDescriptorHeap()
+    {
+        
+
+
+    }
+
     void createGraphicsPipeline() {
         auto vertShaderCode = readFile("shaders/vert.spv");
         auto fragShaderCode = readFile("shaders/frag.spv");
@@ -648,6 +669,26 @@ private:
         vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
     }
 
+
+    void createUniformBuffer()
+    {
+        VmaAllocator allocator; // assume created earlier
+        VkBuffer uniformBuffer;
+        VmaAllocation allocation;
+
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(UniformBufferObject);
+        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU; // CPU can map and write
+
+        vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
+            &uniformBuffer, &allocation, nullptr);
+    }
+
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -734,7 +775,6 @@ private:
         vkCmdSetColorBlendEnableEXT(commandBuffer, 0, 1, color_blend_enables);
         vkCmdSetVertexInputEXT(commandBuffer, 0, nullptr, 0, nullptr);
     }
-
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
         VkCommandBufferBeginInfo beginInfo{};
@@ -915,6 +955,8 @@ private:
         
         timelineValue++;
 
+        updateUniformBuffer(currentFrame);
+
         vkResetCommandBuffer(commandBuffers[currentFrame], /*VkCommandBufferResetFlagBits*/ 0);
         recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
@@ -993,6 +1035,24 @@ private:
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
+    void updateUniformBuffer(uint32_t currentImage)
+    {
+        static auto startTime = std::chrono::high_resolution_clock::now();
+
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+        UniformBufferObject ubo{};
+        ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 100.0f);
+        ubo.proj[1][1] *= -1; // Vulkan clip correction
+
+        void* mapped;
+        vmaMapMemory(allocator, uniformAllocation, &mapped);
+        memcpy(mapped, &ubo, sizeof(ubo));
+        vmaUnmapMemory(allocator, uniformAllocation);
+    })
 
     VkShaderEXT createShaderObject(const std::vector<char>& code, VkShaderStageFlagBits stageFlags) {
         VkShaderCreateInfoEXT shaderCreateInfo{ VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT };
