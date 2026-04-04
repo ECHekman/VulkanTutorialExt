@@ -7,6 +7,7 @@
 #include <GLFW/glfw3.h>
 
 #include <glm/glm.hpp>
+#include <glm/ext.hpp>
 
 #include <iostream>
 #include <fstream>
@@ -34,7 +35,9 @@ const std::vector<const char*> deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     VK_EXT_SHADER_OBJECT_EXTENSION_NAME,
     VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-    VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
+    VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+    VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME,
+    VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
 };
 
 #ifdef NDEBUG
@@ -127,6 +130,10 @@ const std::vector<uint16_t> indices = {
     0, 1, 2, 2, 3, 0
 };
 
+inline VkDeviceSize alignUp(VkDeviceSize size, VkDeviceSize alignment) {
+    return (size + alignment - 1) & ~(alignment - 1);
+}
+
 class HelloTriangleApplication {
 public:
     void run() {
@@ -148,6 +155,14 @@ private:
     VkDevice device;
     VmaAllocator allocator;
 
+    VkPhysicalDeviceDescriptorHeapPropertiesEXT descriptorHeapProperties{};
+    VkBuffer descriptorHeapResourcesBuffer;
+    VmaAllocation descriptorHeapResourcesAllocation;
+    VkDeviceSize bufferHeapOffset{ 0 };
+    VkDeviceSize bufferDescriptorSize{ 0 };
+    VkDeviceSize heapbufferSize;
+
+    
     VkQueue graphicsQueue;
     VkQueue presentQueue;
 
@@ -168,10 +183,8 @@ private:
     VkBuffer indexBuffer;
     VmaAllocation indexAllocation;
 
-    VkBuffer uniformBuffer;
-    VmaAllocation uniformAllocation;
-
-    VkPhysicalDeviceDescriptorHeapPropertiesEXT heapProperties;
+    std::vector<VkBuffer> uniformBuffers;
+    std::vector<VmaAllocation> uniformAllocations;
 
     std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
@@ -206,12 +219,12 @@ private:
         createVMA();
         createSwapChain();
         createImageViews();
-        createDescriptorHeap();
         createGraphicsPipeline();
         createCommandPool();
         createVertexBuffer();
         createIndexBuffer();
-        createUniformBuffer();
+        createUniformBuffers();
+        prepareDescriptorHeap();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -238,7 +251,10 @@ private:
 
         vmaDestroyBuffer(allocator, vertexBuffer, vertexAllocation);
         vmaDestroyBuffer(allocator, indexBuffer, indexAllocation);
-        vmaDestroyBuffer(allocator, uniformBuffer, uniformAllocation);
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vmaDestroyBuffer(allocator, uniformBuffers[i], uniformAllocations[i]);
+        }
+
         vmaDestroyAllocator(allocator);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
@@ -371,6 +387,18 @@ private:
         if (physicalDevice == VK_NULL_HANDLE) {
             throw std::runtime_error("failed to find a suitable GPU!");
         }
+
+        // Get physical device properties
+        descriptorHeapProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT;
+
+        VkPhysicalDeviceProperties2 props{};
+        props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        props.pNext = &descriptorHeapProperties;
+
+        vkGetPhysicalDeviceProperties2(physicalDevice, &props);
+
+        bufferDescriptorSize = alignUp(descriptorHeapProperties.bufferDescriptorSize, descriptorHeapProperties.bufferDescriptorAlignment);
+
     }
 
     void createLogicalDevice() {
@@ -410,13 +438,28 @@ private:
         vulkan13Features.dynamicRendering = VK_TRUE;
         vulkan13Features.pNext = &vulkan12Features;
 
+        VkPhysicalDeviceDescriptorHeapFeaturesEXT descriptorHeapFeatures{};
+        descriptorHeapFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_FEATURES_EXT;
+        descriptorHeapFeatures.descriptorHeap = VK_TRUE;
+        descriptorHeapFeatures.pNext = &vulkan13Features;
+
+        VkPhysicalDeviceMaintenance5Features maintenance5Features{};
+        maintenance5Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES;
+        maintenance5Features.maintenance5 = VK_TRUE;
+        maintenance5Features.pNext = &descriptorHeapFeatures;
+
+        VkPhysicalDeviceShaderUntypedPointersFeaturesKHR untypedPointersFeatures{};
+        untypedPointersFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_UNTYPED_POINTERS_FEATURES_KHR;
+        untypedPointersFeatures.pNext = &maintenance5Features;
+        untypedPointersFeatures.shaderUntypedPointers = VK_TRUE;
+
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
 
-        createInfo.pNext = &vulkan13Features;
+        createInfo.pNext = &maintenance5Features;
 
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
@@ -535,10 +578,72 @@ private:
         }
     }
 
-    void createDescriptorHeap()
+    void prepareDescriptorHeap()
     {
-        
+        heapbufferSize = alignUp(2048 + descriptorHeapProperties.minResourceHeapReservedRange, descriptorHeapProperties.resourceHeapAlignment);
 
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = heapbufferSize;
+        bufferInfo.usage = VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+
+
+        VmaAllocationInfo allocResult{};
+        if (vmaCreateBuffer(
+            allocator,
+            &bufferInfo,
+            &allocInfo,
+            &descriptorHeapResourcesBuffer,
+            &descriptorHeapResourcesAllocation,
+            &allocResult
+        ) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create resource descriptor heap!");
+        }
+
+        auto resourceSize{ MAX_FRAMES_IN_FLIGHT };
+        std::vector<VkHostAddressRangeEXT> hostAddressRangesResources(resourceSize);
+        std::vector<VkResourceDescriptorInfoEXT> resourceDescriptorInfos(resourceSize);
+
+        size_t heapResIndex{ 0 };
+
+        std::array<VkBufferDeviceAddressInfo, MAX_FRAMES_IN_FLIGHT> addrInfo{};
+        std::array<VkDeviceAddressRangeEXT, MAX_FRAMES_IN_FLIGHT> deviceAddressRangesUniformBuffer{};
+        for (auto i = 0; i < uniformBuffers.size(); i++) {
+
+            addrInfo[i].sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            addrInfo[i].buffer = uniformBuffers[i];
+
+            deviceAddressRangesUniformBuffer[i] = {};
+            deviceAddressRangesUniformBuffer[i].address = vkGetBufferDeviceAddress(device, &addrInfo[i]);
+            deviceAddressRangesUniformBuffer[i].size = sizeof(UniformBufferObject);
+
+            resourceDescriptorInfos[heapResIndex] = {};
+            resourceDescriptorInfos[heapResIndex].sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT;
+            resourceDescriptorInfos[heapResIndex].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            resourceDescriptorInfos[heapResIndex].data = {};
+            resourceDescriptorInfos[heapResIndex].data.pAddressRange = &deviceAddressRangesUniformBuffer[i];
+
+            hostAddressRangesResources[heapResIndex] = {};
+            hostAddressRangesResources[heapResIndex].address = static_cast<uint8_t*>(allocResult.pMappedData) + bufferDescriptorSize * i;
+            hostAddressRangesResources[heapResIndex].size = bufferDescriptorSize;
+
+            heapResIndex++;
+        }
+
+        if (vkWriteResourceDescriptorsEXT(
+            device,
+            static_cast<uint32_t>(resourceDescriptorInfos.size()),
+            resourceDescriptorInfos.data(),
+            hostAddressRangesResources.data()
+        ) != VK_SUCCESS) {
+            throw std::runtime_error("failed to write resource descriptors!");
+        }
 
     }
 
@@ -548,6 +653,9 @@ private:
 
         vertShader = createShaderObject(vertShaderCode, VK_SHADER_STAGE_VERTEX_BIT);
         fragShader = createShaderObject(fragShaderCode, VK_SHADER_STAGE_FRAGMENT_BIT);
+
+
+
         return;
     }
 
@@ -670,12 +778,8 @@ private:
     }
 
 
-    void createUniformBuffer()
+    void createUniformBuffers()
     {
-        VmaAllocator allocator; // assume created earlier
-        VkBuffer uniformBuffer;
-        VmaAllocation allocation;
-
         VkBufferCreateInfo bufferInfo{};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = sizeof(UniformBufferObject);
@@ -684,9 +788,23 @@ private:
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU; // CPU can map and write
+        allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-        vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
-            &uniformBuffer, &allocation, nullptr);
+        uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        uniformAllocations.resize(MAX_FRAMES_IN_FLIGHT);
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            VmaAllocationInfo allocResult{};
+            if (vmaCreateBuffer(
+                allocator,
+                &bufferInfo,
+                &allocInfo,
+                &uniformBuffers[i],
+                &uniformAllocations[i],
+                &allocResult
+            ) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create staging buffer!");
+            }
+        }
     }
 
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
@@ -850,6 +968,29 @@ private:
             vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
             vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+            uint32_t pushconstants = currentFrame;
+
+            VkPushDataInfoEXT pushDataInfo{};
+            pushDataInfo.sType = VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT;
+            pushDataInfo.data.address = &pushconstants;
+            pushDataInfo.data.size = sizeof(uint32_t);
+
+            vkCmdPushDataEXT(commandBuffer, &pushDataInfo);
+
+            
+            VkBufferDeviceAddressInfo addrInfo{};
+            addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+            addrInfo.buffer = descriptorHeapResourcesBuffer;
+
+            VkBindHeapInfoEXT bindHeapinfo{};
+            bindHeapinfo.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT;
+            bindHeapinfo.heapRange.address = vkGetBufferDeviceAddress(device, &addrInfo);
+            bindHeapinfo.heapRange.size = heapbufferSize;
+            bindHeapinfo.reservedRangeSize = descriptorHeapProperties.minResourceHeapReservedRange;
+
+            vkCmdBindResourceHeapEXT(commandBuffer, &bindHeapinfo);
+
 
             VkViewport viewport{};
             viewport.x = 0.0f;
@@ -1042,26 +1183,63 @@ private:
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
+        float negative = 1;
+        if (currentImage == 0)
+            negative = -1;
+
         UniformBufferObject ubo{};
-        ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.model = glm::rotate(glm::mat4(1.0f), negative * time * (glm::radians(90.0f)), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 100.0f);
         ubo.proj[1][1] *= -1; // Vulkan clip correction
 
         void* mapped;
-        vmaMapMemory(allocator, uniformAllocation, &mapped);
+        vmaMapMemory(allocator, uniformAllocations[currentImage], &mapped);
         memcpy(mapped, &ubo, sizeof(ubo));
-        vmaUnmapMemory(allocator, uniformAllocation);
-    })
+        vmaUnmapMemory(allocator, uniformAllocations[currentImage]);
+    }
 
     VkShaderEXT createShaderObject(const std::vector<char>& code, VkShaderStageFlagBits stageFlags) {
+        
+        std::array<VkDescriptorSetAndBindingMappingEXT, 1> setAndBindingMappings;
+
+        // Buffer binding
+        setAndBindingMappings[0] = {};
+        setAndBindingMappings[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT;
+        setAndBindingMappings[0].descriptorSet = 0;
+        setAndBindingMappings[0].firstBinding = 0;
+        setAndBindingMappings[0].bindingCount = 1;
+        setAndBindingMappings[0].resourceMask = VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT;
+        setAndBindingMappings[0].source = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT;
+        setAndBindingMappings[0].sourceData.constantOffset.heapArrayStride = static_cast<uint32_t>(bufferDescriptorSize);
+
+        VkShaderDescriptorSetAndBindingMappingInfoEXT descriptorSetAndBindingMappingInfo{};
+        descriptorSetAndBindingMappingInfo.sType = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT;
+        descriptorSetAndBindingMappingInfo.mappingCount = static_cast<uint32_t>(setAndBindingMappings.size()); 
+        descriptorSetAndBindingMappingInfo.pMappings = setAndBindingMappings.data();
+        
         VkShaderCreateInfoEXT shaderCreateInfo{ VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT };
         shaderCreateInfo.stage = stageFlags;
         shaderCreateInfo.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT;
         shaderCreateInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
         shaderCreateInfo.codeSize = code.size();
         shaderCreateInfo.pName = "main";
-        
+        shaderCreateInfo.flags = VK_SHADER_CREATE_DESCRIPTOR_HEAP_BIT_EXT;
+        shaderCreateInfo.pNext = &descriptorSetAndBindingMappingInfo;
+
+        VkPushConstantRange pushConstantRange;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(uint32_t);
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        //shaderCreateInfo.pPushConstantRanges = &pushConstantRange;
+        //shaderCreateInfo.pushConstantRangeCount = 1;
+
+        if (stageFlags & VK_SHADER_STAGE_VERTEX_BIT)
+        {
+            shaderCreateInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        }
+
         VkShaderEXT shader;
         if (vkCreateShadersEXT(device, 1,
             &shaderCreateInfo,

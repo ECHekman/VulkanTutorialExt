@@ -1002,10 +1002,6 @@ private:
         shaderCreateInfo.codeSize = code.size();
         shaderCreateInfo.pName = "main";
         
-        if (stageFlags & VK_SHADER_STAGE_VERTEX_BIT)
-            shaderCreateInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-
         VkShaderEXT shader;
         if (vkCreateShadersEXT(device, 1,
             &shaderCreateInfo,

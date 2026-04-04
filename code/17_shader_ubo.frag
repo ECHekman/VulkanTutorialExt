@@ -1,5 +1,10 @@
 #version 450
 
+layout(push_constant) uniform PushData {
+    int offset;
+} pushData;
+
+
 layout(location = 0) in vec3 fragColor;
 
 layout(location = 0) out vec4 outColor;
