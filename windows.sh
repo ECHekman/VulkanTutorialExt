@@ -15,6 +15,9 @@ trap exit_on_error ERR
 
 pushd .
 
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+echo "Dir = $PROJECT_DIR"
+
 # === vcpkg setup ===
 VCPKG_DIR="$HOME/dev/vcpkg"
 VCPKG_TOOLCHAIN_FILE="$VCPKG_DIR/scripts/buildsystems/vcpkg.cmake"

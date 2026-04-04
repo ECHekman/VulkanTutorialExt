@@ -3,7 +3,6 @@ cmake_minimum_required (VERSION 3.8)
 project (VulkanTutorial)
 
 find_package (glfw3 REQUIRED)
-find_package (glm REQUIRED)
 find_package (Vulkan REQUIRED)
 find_package (tinyobjloader REQUIRED)
 
@@ -56,7 +55,7 @@ function (add_shaders_target TARGET)
   add_custom_command (
     OUTPUT ${SHADERS}
     COMMAND glslang::validator
-    ARGS --target-env vulkan1.0 ${SHADER_SOURCES}
+    ARGS --target-env vulkan1.3 ${SHADER_SOURCES}
     WORKING_DIRECTORY ${SHADERS_DIR}
     DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
     COMMENT "Compiling Shaders"
@@ -153,67 +152,56 @@ add_chapter (17_swap_chain_recreation
   SHADER 08_shader_base)
 
 add_chapter (18_vertex_input
-  SHADER 18_shader_vertexbuffer
-  LIBS glm::glm)
+  SHADER 18_shader_vertexbuffer)
 
 add_chapter (19_vertex_buffer
-  SHADER 18_shader_vertexbuffer
-  LIBS glm::glm)
+  SHADER 18_shader_vertexbuffer)
 
 add_chapter (20_staging_buffer
-  SHADER 18_shader_vertexbuffer
-  LIBS glm::glm)
+  SHADER 18_shader_vertexbuffer)
 
 add_chapter (21_index_buffer
-  SHADER 18_shader_vertexbuffer
-  LIBS glm::glm)
+  SHADER 18_shader_vertexbuffer)
 
 add_chapter (22_descriptor_set_layout
-  SHADER 22_shader_ubo
-  LIBS glm::glm)
+  SHADER 22_shader_ubo)
 
 add_chapter (23_descriptor_sets
-  SHADER 22_shader_ubo
-  LIBS glm::glm)
+  SHADER 22_shader_ubo)
 
 add_chapter (24_texture_image
   SHADER 22_shader_ubo
-  TEXTURES ../images/texture.jpg
-  LIBS glm::glm)
+  TEXTURES ../images/texture.jpg)
 
 add_chapter (25_sampler
   SHADER 22_shader_ubo
-  TEXTURES ../images/texture.jpg
-  LIBS glm::glm)
+  TEXTURES ../images/texture.jpg)
 
 add_chapter (26_texture_mapping
   SHADER 26_shader_textures
-  TEXTURES ../images/texture.jpg
-  LIBS glm::glm)
+  TEXTURES ../images/texture.jpg)
 
 add_chapter (27_depth_buffering
   SHADER 27_shader_depth
-  TEXTURES ../images/texture.jpg
-  LIBS glm::glm)
+  TEXTURES ../images/texture.jpg)
 
 add_chapter (28_model_loading
   SHADER 27_shader_depth
   MODELS ../resources/viking_room.obj
   TEXTURES ../resources/viking_room.png
-  LIBS glm::glm tinyobjloader::tinyobjloader)
+  LIBS tinyobjloader::tinyobjloader)
 
 add_chapter (29_mipmapping
   SHADER 27_shader_depth
   MODELS ../resources/viking_room.obj
   TEXTURES ../resources/viking_room.png
-  LIBS glm::glm tinyobjloader::tinyobjloader)
+  LIBS tinyobjloader::tinyobjloader)
 
 add_chapter (30_multisampling
   SHADER 27_shader_depth
   MODELS ../resources/viking_room.obj
   TEXTURES ../resources/viking_room.png
-  LIBS glm::glm tinyobjloader::tinyobjloader)
+  LIBS tinyobjloader::tinyobjloader)
 
 add_chapter (31_compute_shader
-  SHADER 31_shader_compute
-  LIBS glm::glm)
+  SHADER 31_shader_compute)
