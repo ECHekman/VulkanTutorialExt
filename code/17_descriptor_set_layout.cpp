@@ -156,8 +156,8 @@ private:
     VmaAllocator allocator;
 
     VkPhysicalDeviceDescriptorHeapPropertiesEXT descriptorHeapProperties{};
-    VkBuffer descriptorHeapResourcesBuffer;
-    VmaAllocation descriptorHeapResourcesAllocation;
+    std::vector<VkBuffer> descriptorHeapResourcesBuffers;
+    std::vector<VmaAllocation> descriptorHeapResourcesAllocations;
     VkDeviceSize bufferHeapOffset{ 0 };
     VkDeviceSize bufferDescriptorSize{ 0 };
     VkDeviceSize heapbufferSize;
@@ -581,40 +581,44 @@ private:
     void prepareDescriptorHeap()
     {
         heapbufferSize = alignUp(2048 + descriptorHeapProperties.minResourceHeapReservedRange, descriptorHeapProperties.resourceHeapAlignment);
+        descriptorHeapResourcesAllocations.resize(2);
+        descriptorHeapResourcesBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        std::vector<VmaAllocationInfo> allocResult{};
+        allocResult.resize(MAX_FRAMES_IN_FLIGHT);
 
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = heapbufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            VkBufferCreateInfo bufferInfo{};
+            bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            bufferInfo.size = heapbufferSize;
+            bufferInfo.usage = VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-        allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-
-
-
-        VmaAllocationInfo allocResult{};
-        if (vmaCreateBuffer(
-            allocator,
-            &bufferInfo,
-            &allocInfo,
-            &descriptorHeapResourcesBuffer,
-            &descriptorHeapResourcesAllocation,
-            &allocResult
-        ) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create resource descriptor heap!");
+            VmaAllocationCreateInfo allocInfo{};
+            allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+            allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+            allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+            
+            if (vmaCreateBuffer(
+                allocator,
+                &bufferInfo,
+                &allocInfo,
+                &descriptorHeapResourcesBuffers[i],
+                &descriptorHeapResourcesAllocations[i],
+                &allocResult[i]
+            ) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create resource descriptor heap!");
+            }
         }
 
-        auto resourceSize{ MAX_FRAMES_IN_FLIGHT };
-        std::vector<VkHostAddressRangeEXT> hostAddressRangesResources(resourceSize);
-        std::vector<VkResourceDescriptorInfoEXT> resourceDescriptorInfos(resourceSize);
 
         size_t heapResIndex{ 0 };
 
         std::array<VkBufferDeviceAddressInfo, MAX_FRAMES_IN_FLIGHT> addrInfo{};
         std::array<VkDeviceAddressRangeEXT, MAX_FRAMES_IN_FLIGHT> deviceAddressRangesUniformBuffer{};
-        for (auto i = 0; i < uniformBuffers.size(); i++) {
+        for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+
+            VkHostAddressRangeEXT hostAddressRangesResources;
+            VkResourceDescriptorInfoEXT resourceDescriptorInfos;
 
             addrInfo[i].sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
             addrInfo[i].buffer = uniformBuffers[i];
@@ -623,28 +627,27 @@ private:
             deviceAddressRangesUniformBuffer[i].address = vkGetBufferDeviceAddress(device, &addrInfo[i]);
             deviceAddressRangesUniformBuffer[i].size = sizeof(UniformBufferObject);
 
-            resourceDescriptorInfos[heapResIndex] = {};
-            resourceDescriptorInfos[heapResIndex].sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT;
-            resourceDescriptorInfos[heapResIndex].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            resourceDescriptorInfos[heapResIndex].data = {};
-            resourceDescriptorInfos[heapResIndex].data.pAddressRange = &deviceAddressRangesUniformBuffer[i];
+            resourceDescriptorInfos = {};
+            resourceDescriptorInfos.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT;
+            resourceDescriptorInfos.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            resourceDescriptorInfos.data = {};
+            resourceDescriptorInfos.data.pAddressRange = &deviceAddressRangesUniformBuffer[i];
 
-            hostAddressRangesResources[heapResIndex] = {};
-            hostAddressRangesResources[heapResIndex].address = static_cast<uint8_t*>(allocResult.pMappedData) + bufferDescriptorSize * i;
-            hostAddressRangesResources[heapResIndex].size = bufferDescriptorSize;
+            hostAddressRangesResources = {};
+            hostAddressRangesResources.address = static_cast<uint8_t*>(allocResult[i].pMappedData);
+            hostAddressRangesResources.size = bufferDescriptorSize;
 
             heapResIndex++;
-        }
 
-        if (vkWriteResourceDescriptorsEXT(
-            device,
-            static_cast<uint32_t>(resourceDescriptorInfos.size()),
-            resourceDescriptorInfos.data(),
-            hostAddressRangesResources.data()
-        ) != VK_SUCCESS) {
-            throw std::runtime_error("failed to write resource descriptors!");
+            if (vkWriteResourceDescriptorsEXT(
+                device,
+                1,
+                &resourceDescriptorInfos,
+                &hostAddressRangesResources
+            ) != VK_SUCCESS) {
+                throw std::runtime_error("failed to write resource descriptors!");
+            }
         }
-
     }
 
     void createGraphicsPipeline() {
@@ -981,7 +984,7 @@ private:
             
             VkBufferDeviceAddressInfo addrInfo{};
             addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-            addrInfo.buffer = descriptorHeapResourcesBuffer;
+            addrInfo.buffer = descriptorHeapResourcesBuffers[currentFrame];
 
             VkBindHeapInfoEXT bindHeapinfo{};
             bindHeapinfo.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT;
