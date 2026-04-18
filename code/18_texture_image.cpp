@@ -3,6 +3,9 @@
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
 #include "vma/vk_mem_alloc.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -183,6 +186,8 @@ private:
     VmaAllocation vertexAllocation;
     VkBuffer indexBuffer;
     VmaAllocation indexAllocation;
+    VkImage textureImage;
+    VmaAllocation textureImageAllocation;
 
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VmaAllocation> uniformAllocations;
@@ -224,6 +229,7 @@ private:
         createCommandPool();
         createVertexBuffer();
         createIndexBuffer();
+        createTextureImage();
         createUniformBuffers();
         prepareDescriptorHeap();
         createCommandBuffers();
@@ -664,12 +670,12 @@ private:
     }
 
     void createBuffer(
-        VkDeviceSize size,
-        VkBufferUsageFlags usage,
+        VkDeviceSize size, 
+        VkBufferUsageFlags usage, 
         VmaMemoryUsage vmaUsage,
         VmaAllocationCreateFlags vmaFlags,
         VkMemoryPropertyFlags requiredFlags,
-        VkBuffer& buffer,
+        VkBuffer& buffer, 
         VmaAllocation& bufferAllocation,
         VmaAllocationInfo* outAllocResult = 0
     ) {
@@ -706,8 +712,6 @@ private:
         VmaAllocation stagingAllocation;
 
         VkDeviceSize bufferSize = sizeof(Vertex) * vertices.size();
-
-        VmaAllocationInfo stagingResult{};
         createBuffer(
             bufferSize,
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -715,8 +719,7 @@ private:
             VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
             0,
             stagingBuffer,
-            stagingAllocation,
-            &stagingResult
+            stagingAllocation
         );
 
         void* data = nullptr;
@@ -724,19 +727,17 @@ private:
         memcpy(data, vertices.data(), bufferSize);
         vmaUnmapMemory(allocator, stagingAllocation);
 
-        VmaAllocationInfo allocResult{};
         createBuffer(
             bufferSize,
             VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
             VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
-            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+            0,//VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+            0,
             vertexBuffer,
-            vertexAllocation,
-            &allocResult
+            vertexAllocation
         );
 
-        copyBuffer(stagingBuffer, vertexBuffer, stagingResult.size);
+        copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
 
         vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
     }
@@ -746,38 +747,33 @@ private:
         VkBuffer stagingBuffer;
         VmaAllocation stagingAllocation;
 
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(indices[0]) * indices.size();
-        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-        allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+        VkDeviceSize bufferSize = sizeof(indices[0])* indices.size();
 
         VmaAllocationInfo allocResult{};
-        if (vmaCreateBuffer(
-            allocator,
-            &bufferInfo,
-            &allocInfo,
-            &stagingBuffer,
-            &stagingAllocation,
+        createBuffer(
+            bufferSize,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VMA_MEMORY_USAGE_AUTO,
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+            0,
+            stagingBuffer,
+            stagingAllocation,
             &allocResult
-        ) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create staging buffer!");
-        }
+        );
 
         void* data = nullptr;
         vmaMapMemory(allocator, stagingAllocation, &data);
-        memcpy(data, indices.data(), bufferInfo.size);
+        memcpy(data, indices.data(), bufferSize);
         vmaUnmapMemory(allocator, stagingAllocation);
 
+
+        VkBufferCreateInfo bufferInfo{};
         bufferInfo = {};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = sizeof(indices[0]) * indices.size();
         bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
 
+        VmaAllocationCreateInfo allocInfo{};
         allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
@@ -798,6 +794,103 @@ private:
         copyBuffer(stagingBuffer, indexBuffer, allocResult.size);
 
         vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+    }
+
+
+    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+        VkPhysicalDeviceMemoryProperties memProperties;
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+
+        for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+            if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+                return i;
+            }
+        }
+
+        throw std::runtime_error("failed to find suitable memory type!");
+    }
+
+
+    void createImage(
+        uint32_t width,
+        uint32_t height,
+        VkFormat format,
+        VkImageUsageFlags usage,
+        VkImage& image,
+        VmaAllocation& allocation
+    ) {
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.extent.width = width;
+        imageInfo.extent.height = height;
+        imageInfo.extent.depth = 1;
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = 1;
+        imageInfo.format = format;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageInfo.usage = usage;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+
+        if (vmaCreateImage(
+            allocator,
+            &imageInfo,
+            &allocInfo,
+            &image,
+            &allocation,
+            nullptr
+        ) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create image!");
+        }
+    }
+
+
+    void createTextureImage() {
+        int texWidth, texHeight, texChannels;
+        stbi_uc* pixels = stbi_load("textures/texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+        if (!pixels) {
+            throw std::runtime_error("failed to load texture image!");
+        }
+
+        VkBuffer stagingBuffer;
+        VmaAllocation stagingAllocation;
+
+        createBuffer(
+            imageSize,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VMA_MEMORY_USAGE_AUTO,
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+            0,
+            stagingBuffer,
+            stagingAllocation
+        );
+
+        void* data = nullptr;
+        vmaMapMemory(allocator, stagingAllocation, &data);
+        memcpy(data, pixels, imageSize);
+        vmaUnmapMemory(allocator, stagingAllocation);
+
+        stbi_image_free(pixels);
+
+        createImage(
+            texWidth,
+            texHeight,
+            VK_FORMAT_R8G8B8A8_SRGB,
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            textureImage,
+            textureImageAllocation
+        );
+
+
+
+
     }
 
 
