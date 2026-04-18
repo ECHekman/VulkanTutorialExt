@@ -142,8 +142,16 @@ add_chapter (15_staging_buffer
 add_chapter (16_index_buffer
   SHADER 13_shader_vertexbuffer)
 
-add_chapter (17_descriptor_set_layout
+add_chapter (17_descriptor_heaps
   SHADER 17_shader_ubo)
+
+add_chapter (18_texture_image
+  SHADER 17_shader_ubo
+  TEXTURES ../images/texture.jpg)
+
+add_chapter (19_sampler
+  SHADER 17_shader_ubo
+  TEXTURES ../images/texture.jpg)
 
 add_chapter (16_frames_in_flight
   SHADER 08_shader_base)
