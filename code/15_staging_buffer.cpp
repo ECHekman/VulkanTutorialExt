@@ -1,7 +1,7 @@
-#include "volk.h"
+#include "Volk/volk.h"
 #define VMA_IMPLEMENTATION
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
-#include "vk_mem_alloc.h"
+#include "vma/vk_mem_alloc.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
