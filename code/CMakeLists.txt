@@ -153,6 +153,10 @@ add_chapter (19_sampler
   SHADER 17_shader_ubo
   TEXTURES ../images/texture.jpg)
 
+add_chapter (20_texture_mapping
+  SHADER 26_shader_textures
+  TEXTURES ../images/texture.jpg)
+
 add_chapter (16_frames_in_flight
   SHADER 08_shader_base)
 
