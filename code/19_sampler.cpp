@@ -166,7 +166,7 @@ private:
     VkDeviceSize bufferDescriptorSize{ 0 };
     VkDeviceSize heapbufferSize;
 
-    
+
     VkQueue graphicsQueue;
     VkQueue presentQueue;
 
@@ -609,7 +609,7 @@ private:
             allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
             allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
             allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-            
+
             if (vmaCreateBuffer(
                 allocator,
                 &bufferInfo,
@@ -633,7 +633,7 @@ private:
             VkResourceDescriptorInfoEXT resourceDescriptorInfos;
 
             addrInfo[i].sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-            addrInfo[i].buffer = uniformBuffers[i];
+                addrInfo[i].buffer = uniformBuffers[i];
 
             deviceAddressRangesUniformBuffer[i] = {};
             deviceAddressRangesUniformBuffer[i].address = vkGetBufferDeviceAddress(device, &addrInfo[i]);
@@ -675,12 +675,12 @@ private:
     }
 
     void createBuffer(
-        VkDeviceSize size, 
-        VkBufferUsageFlags usage, 
+        VkDeviceSize size,
+        VkBufferUsageFlags usage,
         VmaMemoryUsage vmaUsage,
         VmaAllocationCreateFlags vmaFlags,
         VkMemoryPropertyFlags requiredFlags,
-        VkBuffer& buffer, 
+        VkBuffer& buffer,
         VmaAllocation& bufferAllocation,
         VmaAllocationInfo* outAllocResult = 0
     ) {
@@ -752,7 +752,7 @@ private:
         VkBuffer stagingBuffer;
         VmaAllocation stagingAllocation;
 
-        VkDeviceSize bufferSize = sizeof(indices[0])* indices.size();
+        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
 
         VmaAllocationInfo allocResult{};
         createBuffer(
@@ -893,7 +893,7 @@ private:
             textureImageAllocation
         );
 
-        
+
         transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
         copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
         transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -1151,7 +1151,7 @@ private:
 
         vkCmdPipelineBarrier2(commandBuffer, &dep);
 
-        
+
         VkRenderingAttachmentInfo colorAttachment{};
         colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         colorAttachment.imageView = swapChainImageViews[imageIndex];
@@ -1170,7 +1170,7 @@ private:
         vkCmdBeginRendering(commandBuffer, &renderingInfo);
         {
             setInitialRenderingState(commandBuffer);
-            
+
             vkCmdSetVertexInputEXT(commandBuffer,
                 1, &Vertex::getBindingDescription(),
                 Vertex::getAttributeDescriptions().size(), Vertex::getAttributeDescriptions().data()
@@ -1203,7 +1203,7 @@ private:
 
             vkCmdPushDataEXT(commandBuffer, &pushDataInfo);
 
-            
+
             VkBufferDeviceAddressInfo addrInfo{};
             addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
             addrInfo.buffer = descriptorHeapResourcesBuffers[currentFrame];
@@ -1318,7 +1318,7 @@ private:
         else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
             throw std::runtime_error("failed to acquire swap chain image!");
         }
-        
+
         timelineValue++;
 
         updateUniformBuffer(currentFrame);
@@ -1368,10 +1368,10 @@ private:
 
         submitInfo.commandBufferInfoCount = 1;
         submitInfo.pCommandBufferInfos = &commandBufferInfo;
-        
+
         submitInfo.signalSemaphoreInfoCount = 2;
         submitInfo.pSignalSemaphoreInfos = signals;
-        
+
         if (vkQueueSubmit2(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
             throw std::runtime_error("failed to submit draw command buffer!");
         }
@@ -1425,7 +1425,7 @@ private:
     }
 
     VkShaderEXT createShaderObject(const std::vector<char>& code, VkShaderStageFlagBits stageFlags) {
-        
+
         std::array<VkDescriptorSetAndBindingMappingEXT, 1> setAndBindingMappings;
 
         // Buffer binding
@@ -1440,9 +1440,9 @@ private:
 
         VkShaderDescriptorSetAndBindingMappingInfoEXT descriptorSetAndBindingMappingInfo{};
         descriptorSetAndBindingMappingInfo.sType = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT;
-        descriptorSetAndBindingMappingInfo.mappingCount = static_cast<uint32_t>(setAndBindingMappings.size()); 
+        descriptorSetAndBindingMappingInfo.mappingCount = static_cast<uint32_t>(setAndBindingMappings.size());
         descriptorSetAndBindingMappingInfo.pMappings = setAndBindingMappings.data();
-        
+
         VkShaderCreateInfoEXT shaderCreateInfo{ VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT };
         shaderCreateInfo.stage = stageFlags;
         shaderCreateInfo.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT;
