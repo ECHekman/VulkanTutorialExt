@@ -171,6 +171,8 @@ private:
     std::vector<VmaAllocation> descriptorHeapResourcesAllocations;
     VkBuffer descriptorHeapSamplerBuffer;
     VmaAllocation descriptorHeapSamplerAllocation;
+    std::vector<VkDeviceAddress> descriptorHeapResourcesAddresses;
+    VkDeviceAddress descriptorHeapSamplerAddress{ 0 };
 
     VkDeviceSize bufferHeapOffset{ 0 };
     VkDeviceSize bufferDescriptorSize{ 0 };
@@ -207,6 +209,7 @@ private:
 
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VmaAllocation> uniformAllocations;
+    std::vector<void*> uniformBuffersMapped;
 
     std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
@@ -511,6 +514,9 @@ private:
             throw std::runtime_error("failed to create logical device!");
         }
 
+        // Load device-level entry points directly (skips the instance dispatch hop).
+        volkLoadDevice(device);
+
         vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
         vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
     }
@@ -648,6 +654,15 @@ private:
             }
         }
 
+        // Cache the per-frame heap device addresses (queried once, used every frame at bind time).
+        descriptorHeapResourcesAddresses.resize(MAX_FRAMES_IN_FLIGHT);
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            VkBufferDeviceAddressInfo heapAddrInfo{};
+            heapAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+            heapAddrInfo.buffer = descriptorHeapResourcesBuffers[i];
+            descriptorHeapResourcesAddresses[i] = vkGetBufferDeviceAddress(device, &heapAddrInfo);
+        }
+
         // Image
         imageHeapOffset = alignUp(uniformBuffers.size() * bufferDescriptorSize, descriptorHeapProperties.imageDescriptorAlignment);
         imageDescriptorSize = alignUp(descriptorHeapProperties.imageDescriptorSize, descriptorHeapProperties.imageDescriptorAlignment);
@@ -754,6 +769,11 @@ private:
             throw std::runtime_error("failed to create resource descriptor heap!");
         }
 
+        // Cache the sampler heap device address (queried once, used every frame at bind time).
+        VkBufferDeviceAddressInfo samplerHeapAddrInfo{};
+        samplerHeapAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        samplerHeapAddrInfo.buffer = descriptorHeapSamplerBuffer;
+        descriptorHeapSamplerAddress = vkGetBufferDeviceAddress(device, &samplerHeapAddrInfo);
 
 
         VkSamplerCreateInfo samplerInfo{};
@@ -888,17 +908,14 @@ private:
         VmaAllocation stagingAllocation;
 
         VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
-
-        VmaAllocationInfo allocResult{};
         createBuffer(
             bufferSize,
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            VMA_MEMORY_USAGE_AUTO,
+            VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
             VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
             0,
             stagingBuffer,
-            stagingAllocation,
-            &allocResult
+            stagingAllocation
         );
 
         void* data = nullptr;
@@ -906,30 +923,15 @@ private:
         memcpy(data, indices.data(), bufferSize);
         vmaUnmapMemory(allocator, stagingAllocation);
 
-
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo = {};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(indices[0]) * indices.size();
-        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo = {};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-        allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-
-        VmaAllocationInfo stagingAllocResult = {};
-        if (vmaCreateBuffer(
-            allocator,
-            &bufferInfo,
-            &allocInfo,
-            &indexBuffer,
-            &indexAllocation,
-            &stagingAllocResult
-        ) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create index buffer!");
-        }
+        createBuffer(
+            bufferSize,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+            VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+            0,
+            0,
+            indexBuffer,
+            indexAllocation
+        );
 
         copyBuffer(stagingBuffer, indexBuffer, bufferSize);
 
@@ -1047,10 +1049,12 @@ private:
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU; // CPU can map and write
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
         allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
         uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
         uniformAllocations.resize(MAX_FRAMES_IN_FLIGHT);
+        uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             VmaAllocationInfo allocResult{};
             if (vmaCreateBuffer(
@@ -1063,6 +1067,8 @@ private:
             ) != VK_SUCCESS) {
                 throw std::runtime_error("failed to create staging buffer!");
             }
+            // Persistently mapped (HOST_COHERENT) — write directly each frame, no map/unmap.
+            uniformBuffersMapped[i] = allocResult.pMappedData;
         }
     }
 
@@ -1339,26 +1345,18 @@ private:
             vkCmdPushDataEXT(commandBuffer, &pushDataInfo);
 
 
-            VkBufferDeviceAddressInfo addrInfo{};
-            addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-            addrInfo.buffer = descriptorHeapResourcesBuffers[currentFrame];
-
             VkBindHeapInfoEXT bindHeapinfo{};
             bindHeapinfo.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT;
-            bindHeapinfo.heapRange.address = vkGetBufferDeviceAddress(device, &addrInfo);
+            bindHeapinfo.heapRange.address = descriptorHeapResourcesAddresses[currentFrame];
             bindHeapinfo.heapRange.size = heapbufferSize;
             bindHeapinfo.reservedRangeSize = descriptorHeapProperties.minResourceHeapReservedRange;
 
             vkCmdBindResourceHeapEXT(commandBuffer, &bindHeapinfo);
 
 
-            VkBufferDeviceAddressInfo addrSamplerInfo{};
-            addrSamplerInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-            addrSamplerInfo.buffer = descriptorHeapSamplerBuffer;
-
             VkBindHeapInfoEXT bindSamplerHeapinfo{};
             bindSamplerHeapinfo.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT;
-            bindSamplerHeapinfo.heapRange.address = vkGetBufferDeviceAddress(device, &addrSamplerInfo);
+            bindSamplerHeapinfo.heapRange.address = descriptorHeapSamplerAddress;
             bindSamplerHeapinfo.heapRange.size = heapSamplerbufferSize;
             bindSamplerHeapinfo.reservedRangeSize = descriptorHeapProperties.minSamplerHeapReservedRange;
             vkCmdBindSamplerHeapEXT(commandBuffer, &bindSamplerHeapinfo);
@@ -1564,10 +1562,7 @@ private:
         ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 100.0f);
         ubo.proj[1][1] *= -1; // Vulkan clip correction
 
-        void* mapped;
-        vmaMapMemory(allocator, uniformAllocations[currentImage], &mapped);
-        memcpy(mapped, &ubo, sizeof(ubo));
-        vmaUnmapMemory(allocator, uniformAllocations[currentImage]);
+        memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
     VkShaderEXT createShaderObject(const std::vector<char>& code, VkShaderStageFlagBits stageFlags) {
