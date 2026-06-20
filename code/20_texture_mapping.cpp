@@ -174,7 +174,6 @@ private:
     std::vector<VkDeviceAddress> descriptorHeapResourcesAddresses;
     VkDeviceAddress descriptorHeapSamplerAddress{ 0 };
 
-    VkDeviceSize bufferHeapOffset{ 0 };
     VkDeviceSize bufferDescriptorSize{ 0 };
     VkDeviceSize samplerHeapOffset{ 0 };
     VkDeviceSize samplerDescriptorSize{ 0 };
@@ -666,8 +665,6 @@ private:
         // Image
         imageHeapOffset = alignUp(uniformBuffers.size() * bufferDescriptorSize, descriptorHeapProperties.imageDescriptorAlignment);
         imageDescriptorSize = alignUp(descriptorHeapProperties.imageDescriptorSize, descriptorHeapProperties.imageDescriptorAlignment);
-         
-        size_t heapResIndex{ 0 };
 
         std::array<VkBufferDeviceAddressInfo, MAX_FRAMES_IN_FLIGHT> addrInfo{};
         std::array<VkDeviceAddressRangeEXT, MAX_FRAMES_IN_FLIGHT> deviceAddressRangesUniformBuffer{};
@@ -726,12 +723,9 @@ private:
             hostAddressRangesResourceImage.size = imageDescriptorSize;
             hostAddressRangesResources.push_back(hostAddressRangesResourceImage);
 
-
-            heapResIndex++;
-
             if (vkWriteResourceDescriptorsEXT(
                 device,
-                resourceDescriptorInfos.size(),
+                static_cast<uint32_t>(resourceDescriptorInfos.size()),
                 resourceDescriptorInfos.data(),
                 hostAddressRangesResources.data()
             ) != VK_SUCCESS) {
@@ -936,20 +930,6 @@ private:
         copyBuffer(stagingBuffer, indexBuffer, bufferSize);
 
         vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
-    }
-
-
-    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
-        VkPhysicalDeviceMemoryProperties memProperties;
-        vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
-
-        for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-            if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-                return i;
-            }
-        }
-
-        throw std::runtime_error("failed to find suitable memory type!");
     }
 
 
@@ -1314,7 +1294,7 @@ private:
 
             vkCmdSetVertexInputEXT(commandBuffer,
                 1, &Vertex::getBindingDescription(),
-                Vertex::getAttributeDescriptions().size(), Vertex::getAttributeDescriptions().data()
+                static_cast<uint32_t>(Vertex::getAttributeDescriptions().size()), Vertex::getAttributeDescriptions().data()
             );
 
             VkShaderStageFlagBits stages[] = {
@@ -1615,14 +1595,6 @@ private:
         shaderCreateInfo.pName = "main";
         shaderCreateInfo.flags = VK_SHADER_CREATE_DESCRIPTOR_HEAP_BIT_EXT;
         shaderCreateInfo.pNext = &descriptorSetAndBindingMappingInfo;
-
-        VkPushConstantRange pushConstantRange;
-        pushConstantRange.offset = 0;
-        pushConstantRange.size = sizeof(uint32_t);
-        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
-        //shaderCreateInfo.pPushConstantRanges = &pushConstantRange;
-        //shaderCreateInfo.pushConstantRangeCount = 1;
 
         if (stageFlags & VK_SHADER_STAGE_VERTEX_BIT)
         {
