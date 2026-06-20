@@ -204,8 +204,6 @@ private:
 
     VkImage textureImage;
     VmaAllocation textureImageAllocation;
-    VkImageView textureImageView;
-    VkSampler textureSampler;
 
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VmaAllocation> uniformAllocations;
@@ -247,8 +245,6 @@ private:
         createVertexBuffer();
         createIndexBuffer();
         createTextureImage();
-        createTextureImageView();
-        createTextureSampler();
         createUniformBuffers();
         prepareDescriptorHeap();
         prepareSamplerDescriptorHeap();
@@ -278,8 +274,6 @@ private:
 
         cleanupSwapChain();
 
-        vkDestroySampler(device, textureSampler, nullptr);
-        vkDestroyImageView(device, textureImageView, nullptr);
         vmaDestroyImage(allocator, textureImage, textureImageAllocation);
 
         vmaDestroyBuffer(allocator, vertexBuffer, vertexAllocation);
@@ -292,11 +286,15 @@ private:
             vmaDestroyBuffer(allocator, descriptorHeapResourcesBuffers[i], descriptorHeapResourcesAllocations[i]);
         }
 
+        vmaDestroyBuffer(allocator, descriptorHeapSamplerBuffer, descriptorHeapSamplerAllocation);
+
         vmaDestroyAllocator(allocator);
 
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+        for (size_t i = 0; i < imageAvailableSemaphores.size(); i++) {
             vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+        }
+        for (size_t i = 0; i < renderFinishedSemaphores.size(); i++) {
+            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
         }
         vkDestroySemaphore(device, timelineSemaphore, nullptr);
 
@@ -311,7 +309,6 @@ private:
             DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
         }
 
-        vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyInstance(instance, nullptr);
 
@@ -622,7 +619,7 @@ private:
     void prepareDescriptorHeap()
     {
         heapbufferSize = alignUp(2048 + descriptorHeapProperties.minResourceHeapReservedRange, descriptorHeapProperties.resourceHeapAlignment);
-        descriptorHeapResourcesAllocations.resize(2);
+        descriptorHeapResourcesAllocations.resize(MAX_FRAMES_IN_FLIGHT);
         descriptorHeapResourcesBuffers.resize(MAX_FRAMES_IN_FLIGHT);
         std::vector<VmaAllocationInfo> allocResult{};
         allocResult.resize(MAX_FRAMES_IN_FLIGHT);
@@ -810,8 +807,6 @@ private:
         vertShader = createShaderObject(vertShaderCode, VK_SHADER_STAGE_VERTEX_BIT);
         fragShader = createShaderObject(fragShaderCode, VK_SHADER_STAGE_FRAGMENT_BIT);
 
-
-
         return;
     }
 
@@ -937,7 +932,7 @@ private:
             throw std::runtime_error("failed to create index buffer!");
         }
 
-        copyBuffer(stagingBuffer, indexBuffer, allocResult.size);
+        copyBuffer(stagingBuffer, indexBuffer, bufferSize);
 
         vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
     }
@@ -1040,45 +1035,6 @@ private:
         transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
-    }
-
-
-    void createTextureImageView() {
-        textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB);
-    }
-
-
-    void createTextureSampler() {
-        VkSamplerCreateInfo samplerInfo{};
-        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.magFilter = VK_FILTER_LINEAR;
-        samplerInfo.minFilter = VK_FILTER_LINEAR;
-        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.anisotropyEnable = VK_TRUE;
-        samplerInfo.maxAnisotropy = 1.0f;
-
-        VkPhysicalDeviceProperties properties{};
-        vkGetPhysicalDeviceProperties(physicalDevice, &properties);
-
-        samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
-        samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-        samplerInfo.unnormalizedCoordinates = VK_FALSE;
-
-        samplerInfo.compareEnable = VK_FALSE;
-        samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-
-        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-        samplerInfo.mipLodBias = 0.0f;
-        samplerInfo.minLod = 0.0f;
-        samplerInfo.maxLod = 0.0f;
-
-        if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create texture sampler!");
-        }
-
-        
     }
 
 
@@ -1460,14 +1416,20 @@ private:
         VkSemaphoreCreateInfo semaphoreInfo{};
         semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
+        // Acquire semaphores are per frame-in-flight; the render-finished semaphore is
+        // waited by present, which holds it until that swapchain image is re-acquired,
+        // so it must be per swapchain image and indexed by imageIndex.
         imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-        renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        renderFinishedSemaphores.resize(swapChainImages.size());
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
-                vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS)
+            if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS)
                 throw std::runtime_error("failed to create synchronization objects for a frame!");
+        }
 
+        for (size_t i = 0; i < renderFinishedSemaphores.size(); i++) {
+            if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS)
+                throw std::runtime_error("failed to create synchronization objects for a frame!");
         }
 
         // Create timeline semaphore
@@ -1534,7 +1496,7 @@ private:
 
         VkSemaphoreSubmitInfo signalBinary{};
         signalBinary.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-        signalBinary.semaphore = renderFinishedSemaphores[currentFrame];
+        signalBinary.semaphore = renderFinishedSemaphores[imageIndex];
         signalBinary.stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
 
         VkSemaphoreSubmitInfo signalSemaphoreInfo{};
@@ -1573,7 +1535,7 @@ private:
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
         presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = &renderFinishedSemaphores[currentFrame];
+        presentInfo.pWaitSemaphores = &renderFinishedSemaphores[imageIndex];
 
         VkSwapchainKHR swapChains[] = { swapChain };
         presentInfo.swapchainCount = 1;
