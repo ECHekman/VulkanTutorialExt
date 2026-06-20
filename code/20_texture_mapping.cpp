@@ -86,6 +86,7 @@ struct SwapChainSupportDetails {
 struct Vertex {
     glm::vec2 pos;
     glm::vec3 color;
+    glm::vec2 texCoord;
 
     static VkVertexInputBindingDescription2EXT getBindingDescription() {
         VkVertexInputBindingDescription2EXT bindingDescription{};
@@ -98,8 +99,8 @@ struct Vertex {
         return bindingDescription;
     }
 
-    static std::array<VkVertexInputAttributeDescription2EXT, 2> getAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription2EXT, 2> attributeDescriptions{};
+    static std::array<VkVertexInputAttributeDescription2EXT, 3> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription2EXT, 3> attributeDescriptions{};
 
         attributeDescriptions[0].sType = VK_STRUCTURE_TYPE_VERTEX_INPUT_ATTRIBUTE_DESCRIPTION_2_EXT;
         attributeDescriptions[0].binding = 0;
@@ -113,6 +114,12 @@ struct Vertex {
         attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[1].offset = offsetof(Vertex, color);
 
+        attributeDescriptions[2].sType = VK_STRUCTURE_TYPE_VERTEX_INPUT_ATTRIBUTE_DESCRIPTION_2_EXT;
+        attributeDescriptions[2].binding = 0;
+        attributeDescriptions[2].location = 2;
+        attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
+
         return attributeDescriptions;
     }
 };
@@ -124,10 +131,10 @@ struct UniformBufferObject {
 };
 
 const std::vector<Vertex> vertices = {
-    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}
 };
 
 const std::vector<uint16_t> indices = {
@@ -162,9 +169,16 @@ private:
     VkPhysicalDeviceDescriptorHeapPropertiesEXT descriptorHeapProperties{};
     std::vector<VkBuffer> descriptorHeapResourcesBuffers;
     std::vector<VmaAllocation> descriptorHeapResourcesAllocations;
+    VkBuffer descriptorHeapSamplerBuffer;
+    VmaAllocation descriptorHeapSamplerAllocation;
+
     VkDeviceSize bufferHeapOffset{ 0 };
     VkDeviceSize bufferDescriptorSize{ 0 };
+    VkDeviceSize samplerHeapOffset{ 0 };
+    VkDeviceSize samplerDescriptorSize{ 0 };
     VkDeviceSize heapbufferSize;
+    VkDeviceSize heapSamplerbufferSize;
+
 
 
     VkQueue graphicsQueue;
@@ -186,7 +200,7 @@ private:
     VmaAllocation vertexAllocation;
     VkBuffer indexBuffer;
     VmaAllocation indexAllocation;
-    
+
     VkImage textureImage;
     VmaAllocation textureImageAllocation;
     VkImageView textureImageView;
@@ -237,6 +251,7 @@ private:
         createTextureSampler();
         createUniformBuffers();
         prepareDescriptorHeap();
+        prepareSamplerDescriptorHeap();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -635,7 +650,7 @@ private:
             }
         }
 
-
+         
         size_t heapResIndex{ 0 };
 
         std::array<VkBufferDeviceAddressInfo, MAX_FRAMES_IN_FLIGHT> addrInfo{};
@@ -643,20 +658,20 @@ private:
         for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 
             VkHostAddressRangeEXT hostAddressRangesResources;
-            VkResourceDescriptorInfoEXT resourceDescriptorInfos;
+            VkResourceDescriptorInfoEXT resourceDescriptorInfos[2];
 
-            addrInfo[i].sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-                addrInfo[i].buffer = uniformBuffers[i];
+            addrInfo[i].sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+            addrInfo[i].buffer = uniformBuffers[i];
 
             deviceAddressRangesUniformBuffer[i] = {};
             deviceAddressRangesUniformBuffer[i].address = vkGetBufferDeviceAddress(device, &addrInfo[i]);
             deviceAddressRangesUniformBuffer[i].size = sizeof(UniformBufferObject);
 
-            resourceDescriptorInfos = {};
-            resourceDescriptorInfos.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT;
-            resourceDescriptorInfos.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            resourceDescriptorInfos.data = {};
-            resourceDescriptorInfos.data.pAddressRange = &deviceAddressRangesUniformBuffer[i];
+            resourceDescriptorInfos[i] = {};
+            resourceDescriptorInfos[i].sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT;
+            resourceDescriptorInfos[i].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            resourceDescriptorInfos[i].data = {};
+            resourceDescriptorInfos[i].data.pAddressRange = &deviceAddressRangesUniformBuffer[i];
 
             hostAddressRangesResources = {};
             hostAddressRangesResources.address = static_cast<uint8_t*>(allocResult[i].pMappedData);
@@ -666,12 +681,86 @@ private:
 
             if (vkWriteResourceDescriptorsEXT(
                 device,
-                1,
-                &resourceDescriptorInfos,
+                2,
+                resourceDescriptorInfos,
                 &hostAddressRangesResources
             ) != VK_SUCCESS) {
                 throw std::runtime_error("failed to write resource descriptors!");
             }
+        }
+    }
+
+
+
+    void prepareSamplerDescriptorHeap()
+    {
+        heapSamplerbufferSize = alignUp(2048 + descriptorHeapProperties.minSamplerHeapReservedRange, descriptorHeapProperties.samplerHeapAlignment);
+        samplerDescriptorSize = alignUp(descriptorHeapProperties.samplerDescriptorSize, descriptorHeapProperties.samplerDescriptorAlignment);
+
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = heapbufferSize;
+        bufferInfo.usage = VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+        VmaAllocationInfo allocResult;
+        if (vmaCreateBuffer(
+            allocator,
+            &bufferInfo,
+            &allocInfo,
+            &descriptorHeapSamplerBuffer,
+            &descriptorHeapSamplerAllocation,
+            &allocResult
+        ) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create resource descriptor heap!");
+        }
+
+
+        VkSamplerCreateInfo samplerInfo{};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.magFilter = VK_FILTER_LINEAR;
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.anisotropyEnable = VK_TRUE;
+        samplerInfo.maxAnisotropy = 1.0f;
+
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+
+        samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+        samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        samplerInfo.unnormalizedCoordinates = VK_FALSE;
+
+        samplerInfo.compareEnable = VK_FALSE;
+        samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerInfo.mipLodBias = 0.0f;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = 0.0f;
+
+
+        VkHostAddressRangeEXT hostAddressRangesSamplers = {};
+        hostAddressRangesSamplers.address = static_cast<uint8_t*>(allocResult.pMappedData);
+        hostAddressRangesSamplers.size = samplerDescriptorSize;
+
+        // For multiple textures:
+        // hostAddressRangesSamplers.address = static_cast<uint8_t*>(allocResult.pMappedData) + samplerDescriptorSize * i
+        
+
+        if (vkWriteSamplerDescriptorsEXT(
+            device,
+            1,
+            &samplerInfo,
+            &hostAddressRangesSamplers
+        ) != VK_SUCCESS) {
+            throw std::runtime_error("failed to write resource descriptors!");
         }
     }
 
@@ -949,6 +1038,8 @@ private:
         if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
             throw std::runtime_error("failed to create texture sampler!");
         }
+
+        
     }
 
 
@@ -1265,6 +1356,18 @@ private:
             bindHeapinfo.reservedRangeSize = descriptorHeapProperties.minResourceHeapReservedRange;
 
             vkCmdBindResourceHeapEXT(commandBuffer, &bindHeapinfo);
+
+
+            VkBufferDeviceAddressInfo addrSamplerInfo{};
+            addrSamplerInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+            addrSamplerInfo.buffer = descriptorHeapSamplerBuffer;
+
+            VkBindHeapInfoEXT bindSamplerHeapinfo{};
+            bindSamplerHeapinfo.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT;
+            bindSamplerHeapinfo.heapRange.address = vkGetBufferDeviceAddress(device, &addrSamplerInfo);
+            bindSamplerHeapinfo.heapRange.size = heapSamplerbufferSize;
+            bindSamplerHeapinfo.reservedRangeSize = descriptorHeapProperties.minSamplerHeapReservedRange;
+            vkCmdBindSamplerHeapEXT(commandBuffer, &bindSamplerHeapinfo);
 
 
             VkViewport viewport{};

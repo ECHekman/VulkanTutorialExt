@@ -632,8 +632,8 @@ private:
             VkHostAddressRangeEXT hostAddressRangesResources;
             VkResourceDescriptorInfoEXT resourceDescriptorInfos;
 
-            addrInfo[i].sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-                addrInfo[i].buffer = uniformBuffers[i];
+            addrInfo[i].sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+            addrInfo[i].buffer = uniformBuffers[i];
 
             deviceAddressRangesUniformBuffer[i] = {};
             deviceAddressRangesUniformBuffer[i].address = vkGetBufferDeviceAddress(device, &addrInfo[i]);

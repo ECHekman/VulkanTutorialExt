@@ -154,7 +154,7 @@ add_chapter (19_sampler
   TEXTURES ../images/texture.jpg)
 
 add_chapter (20_texture_mapping
-  SHADER 26_shader_textures
+  SHADER 20_shader_textures
   TEXTURES ../images/texture.jpg)
 
 add_chapter (16_frames_in_flight
