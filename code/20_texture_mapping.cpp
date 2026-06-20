@@ -788,7 +788,6 @@ private:
 
         // For multiple textures:
         // hostAddressRangesSamplers.address = static_cast<uint8_t*>(allocResult.pMappedData) + samplerDescriptorSize * i
-        
 
         if (vkWriteSamplerDescriptorsEXT(
             device,
@@ -1416,9 +1415,6 @@ private:
         VkSemaphoreCreateInfo semaphoreInfo{};
         semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-        // Acquire semaphores are per frame-in-flight; the render-finished semaphore is
-        // waited by present, which holds it until that swapchain image is re-acquired,
-        // so it must be per swapchain image and indexed by imageIndex.
         imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         renderFinishedSemaphores.resize(swapChainImages.size());
 
@@ -1562,12 +1558,8 @@ private:
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-        float negative = 1;
-        //if (currentImage == 0)
-        //    negative = -1;
-
         UniformBufferObject ubo{};
-        ubo.model = glm::rotate(glm::mat4(1.0f), negative * time * (glm::radians(90.0f)), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.model = glm::rotate(glm::mat4(1.0f), time * (glm::radians(90.0f)), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 100.0f);
         ubo.proj[1][1] *= -1; // Vulkan clip correction
