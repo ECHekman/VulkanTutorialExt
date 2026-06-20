@@ -176,9 +176,10 @@ private:
     VkDeviceSize bufferDescriptorSize{ 0 };
     VkDeviceSize samplerHeapOffset{ 0 };
     VkDeviceSize samplerDescriptorSize{ 0 };
-    VkDeviceSize heapbufferSize;
-    VkDeviceSize heapSamplerbufferSize;
-
+    VkDeviceSize heapbufferSize{ 0 };
+    VkDeviceSize heapSamplerbufferSize{ 0 };
+    VkDeviceSize imageHeapOffset{ 0 };
+    VkDeviceSize imageDescriptorSize{ 0 };
 
 
     VkQueue graphicsQueue;
@@ -242,7 +243,6 @@ private:
         createVMA();
         createSwapChain();
         createImageViews();
-        createGraphicsPipeline();
         createCommandPool();
         createVertexBuffer();
         createIndexBuffer();
@@ -252,6 +252,7 @@ private:
         createUniformBuffers();
         prepareDescriptorHeap();
         prepareSamplerDescriptorHeap();
+        createShaderObjects();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -650,6 +651,9 @@ private:
             }
         }
 
+        // Image
+        imageHeapOffset = alignUp(uniformBuffers.size() * bufferDescriptorSize, descriptorHeapProperties.imageDescriptorAlignment);
+        imageDescriptorSize = alignUp(descriptorHeapProperties.imageDescriptorSize, descriptorHeapProperties.imageDescriptorAlignment);
          
         size_t heapResIndex{ 0 };
 
@@ -657,9 +661,10 @@ private:
         std::array<VkDeviceAddressRangeEXT, MAX_FRAMES_IN_FLIGHT> deviceAddressRangesUniformBuffer{};
         for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 
-            VkHostAddressRangeEXT hostAddressRangesResources;
-            VkResourceDescriptorInfoEXT resourceDescriptorInfos[2];
+            std::vector<VkHostAddressRangeEXT> hostAddressRangesResources;
+            std::vector<VkResourceDescriptorInfoEXT> resourceDescriptorInfos;
 
+            // Uniform buffer
             addrInfo[i].sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
             addrInfo[i].buffer = uniformBuffers[i];
 
@@ -667,23 +672,56 @@ private:
             deviceAddressRangesUniformBuffer[i].address = vkGetBufferDeviceAddress(device, &addrInfo[i]);
             deviceAddressRangesUniformBuffer[i].size = sizeof(UniformBufferObject);
 
-            resourceDescriptorInfos[i] = {};
-            resourceDescriptorInfos[i].sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT;
-            resourceDescriptorInfos[i].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            resourceDescriptorInfos[i].data = {};
-            resourceDescriptorInfos[i].data.pAddressRange = &deviceAddressRangesUniformBuffer[i];
+            VkResourceDescriptorInfoEXT resourceDescriptorInfo = {};
+            resourceDescriptorInfo.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT;
+            resourceDescriptorInfo.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            resourceDescriptorInfo.data = {};
+            resourceDescriptorInfo.data.pAddressRange = &deviceAddressRangesUniformBuffer[i];
+            resourceDescriptorInfos.push_back(resourceDescriptorInfo);
 
-            hostAddressRangesResources = {};
-            hostAddressRangesResources.address = static_cast<uint8_t*>(allocResult[i].pMappedData);
-            hostAddressRangesResources.size = bufferDescriptorSize;
+            VkHostAddressRangeEXT hostAddressRangesResource = {};
+            hostAddressRangesResource.address = static_cast<uint8_t*>(allocResult[i].pMappedData);
+            hostAddressRangesResource.size = bufferDescriptorSize;
+            hostAddressRangesResources.push_back(hostAddressRangesResource);
+
+            // Image views
+            VkImageViewCreateInfo imageViewCreateInfo = {};
+            imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            imageViewCreateInfo.image = textureImage;
+            imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            imageViewCreateInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+            imageViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            imageViewCreateInfo.subresourceRange.baseMipLevel = 0;
+            imageViewCreateInfo.subresourceRange.levelCount = 1;
+            imageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+            imageViewCreateInfo.subresourceRange.layerCount = 1;
+
+            VkImageDescriptorInfoEXT imageDescriptorInfo = {};
+            imageDescriptorInfo.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT;
+            imageDescriptorInfo.pView = &imageViewCreateInfo;
+            imageDescriptorInfo.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            VkResourceDescriptorInfoEXT resourceImageDescriptorInfo = {};
+            resourceImageDescriptorInfo.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT;
+            resourceImageDescriptorInfo.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            resourceImageDescriptorInfo.data = {};
+            resourceImageDescriptorInfo.data.pImage = &imageDescriptorInfo;
+            resourceDescriptorInfos.push_back(resourceImageDescriptorInfo);
+
+            VkHostAddressRangeEXT hostAddressRangesResourceImage;
+            hostAddressRangesResourceImage = {};
+            hostAddressRangesResourceImage.address = static_cast<uint8_t*>(allocResult[i].pMappedData) + imageHeapOffset;
+            hostAddressRangesResourceImage.size = imageDescriptorSize;
+            hostAddressRangesResources.push_back(hostAddressRangesResourceImage);
+
 
             heapResIndex++;
 
             if (vkWriteResourceDescriptorsEXT(
                 device,
-                2,
-                resourceDescriptorInfos,
-                &hostAddressRangesResources
+                resourceDescriptorInfos.size(),
+                resourceDescriptorInfos.data(),
+                hostAddressRangesResources.data()
             ) != VK_SUCCESS) {
                 throw std::runtime_error("failed to write resource descriptors!");
             }
@@ -699,7 +737,7 @@ private:
 
         VkBufferCreateInfo bufferInfo{};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = heapbufferSize;
+        bufferInfo.size = heapSamplerbufferSize;
         bufferInfo.usage = VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
         VmaAllocationCreateInfo allocInfo{};
@@ -718,6 +756,7 @@ private:
         ) != VK_SUCCESS) {
             throw std::runtime_error("failed to create resource descriptor heap!");
         }
+
 
 
         VkSamplerCreateInfo samplerInfo{};
@@ -764,7 +803,7 @@ private:
         }
     }
 
-    void createGraphicsPipeline() {
+    void createShaderObjects() {
         auto vertShaderCode = readFile("shaders/vert.spv");
         auto fragShaderCode = readFile("shaders/frag.spv");
 
@@ -1562,8 +1601,8 @@ private:
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
         float negative = 1;
-        if (currentImage == 0)
-            negative = -1;
+        //if (currentImage == 0)
+        //    negative = -1;
 
         UniformBufferObject ubo{};
         ubo.model = glm::rotate(glm::mat4(1.0f), negative * time * (glm::radians(90.0f)), glm::vec3(0.0f, 0.0f, 1.0f));
@@ -1579,7 +1618,7 @@ private:
 
     VkShaderEXT createShaderObject(const std::vector<char>& code, VkShaderStageFlagBits stageFlags) {
 
-        std::array<VkDescriptorSetAndBindingMappingEXT, 1> setAndBindingMappings;
+        std::array<VkDescriptorSetAndBindingMappingEXT, 3> setAndBindingMappings;
 
         // Buffer binding
         setAndBindingMappings[0] = {};
@@ -1590,6 +1629,29 @@ private:
         setAndBindingMappings[0].resourceMask = VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT;
         setAndBindingMappings[0].source = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT;
         setAndBindingMappings[0].sourceData.constantOffset.heapArrayStride = static_cast<uint32_t>(bufferDescriptorSize);
+
+        // Image binding
+        setAndBindingMappings[1] = {};
+        setAndBindingMappings[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT;
+        setAndBindingMappings[1].descriptorSet = 1;
+        setAndBindingMappings[1].firstBinding = 0;
+        setAndBindingMappings[1].bindingCount = 1;
+        setAndBindingMappings[1].resourceMask = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
+        setAndBindingMappings[1].source = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT;
+        setAndBindingMappings[1].sourceData.constantOffset.heapArrayStride = static_cast<uint32_t>(imageDescriptorSize);
+        setAndBindingMappings[1].sourceData.constantOffset.heapOffset = static_cast<uint32_t>(imageHeapOffset);
+
+        // Sampler binding
+        setAndBindingMappings[2] = {};
+        setAndBindingMappings[2].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT;
+        setAndBindingMappings[2].descriptorSet = 2;
+        setAndBindingMappings[2].firstBinding = 0;
+        setAndBindingMappings[2].bindingCount = 1;
+        setAndBindingMappings[2].resourceMask = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
+        setAndBindingMappings[2].source = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT;
+        setAndBindingMappings[2].sourceData.constantOffset.heapArrayStride = static_cast<uint32_t>(samplerDescriptorSize);
+        setAndBindingMappings[2].sourceData.constantOffset.heapOffset = static_cast<uint32_t>(samplerHeapOffset);
+
 
         VkShaderDescriptorSetAndBindingMappingInfoEXT descriptorSetAndBindingMappingInfo{};
         descriptorSetAndBindingMappingInfo.sType = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT;
