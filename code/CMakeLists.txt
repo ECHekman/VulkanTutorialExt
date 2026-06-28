@@ -157,6 +157,10 @@ add_chapter (20_texture_mapping
   SHADER 20_shader_textures
   TEXTURES ../images/texture.jpg)
 
+add_chapter (21_depth_buffering
+  SHADER 21_depth_buffering
+  TEXTURES ../images/texture.jpg)
+
 add_chapter (16_frames_in_flight
   SHADER 08_shader_base)
 
