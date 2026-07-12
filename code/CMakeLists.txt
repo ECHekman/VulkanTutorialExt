@@ -167,6 +167,12 @@ add_chapter (22_model_loading
   TEXTURES ../resources/viking_room.png
   LIBS tinyobjloader::tinyobjloader)
 
+add_chapter (23_mipmapping
+  SHADER 21_depth_buffering
+  MODELS ../resources/viking_room.obj
+  TEXTURES ../resources/viking_room.png
+  LIBS tinyobjloader::tinyobjloader)
+
 add_chapter (16_frames_in_flight
   SHADER 08_shader_base)
 
