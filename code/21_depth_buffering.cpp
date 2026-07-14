@@ -1432,6 +1432,7 @@ private:
             bindHeapinfo.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT;
             bindHeapinfo.heapRange.address = descriptorHeapResourcesAddresses[currentFrame];
             bindHeapinfo.heapRange.size = heapbufferSize;
+            bindHeapinfo.reservedRangeOffset = heapbufferSize - descriptorHeapProperties.minResourceHeapReservedRange;
             bindHeapinfo.reservedRangeSize = descriptorHeapProperties.minResourceHeapReservedRange;
 
             vkCmdBindResourceHeapEXT(commandBuffer, &bindHeapinfo);
@@ -1441,6 +1442,7 @@ private:
             bindSamplerHeapinfo.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT;
             bindSamplerHeapinfo.heapRange.address = descriptorHeapSamplerAddress;
             bindSamplerHeapinfo.heapRange.size = heapSamplerbufferSize;
+            bindSamplerHeapinfo.reservedRangeOffset = heapSamplerbufferSize - descriptorHeapProperties.minSamplerHeapReservedRange;
             bindSamplerHeapinfo.reservedRangeSize = descriptorHeapProperties.minSamplerHeapReservedRange;
             vkCmdBindSamplerHeapEXT(commandBuffer, &bindSamplerHeapinfo);
 

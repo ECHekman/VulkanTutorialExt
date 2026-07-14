@@ -622,7 +622,7 @@ private:
         swapChainExtent = extent;
     }
 
-    VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels) {
+    VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels = 1) {
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = image;
@@ -633,7 +633,7 @@ private:
         viewInfo.subresourceRange.levelCount = mipLevels;
         viewInfo.subresourceRange.baseArrayLayer = 0;
         viewInfo.subresourceRange.layerCount = 1;
-
+        
         VkImageView imageView;
         if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
             throw std::runtime_error("failed to create image view!");
@@ -657,6 +657,7 @@ private:
         createImage(
             swapChainExtent.width, 
             swapChainExtent.height,
+            1,
             depthFormat,
             VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
             depthImage,
@@ -806,10 +807,10 @@ private:
             imageViewCreateInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
             imageViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             imageViewCreateInfo.subresourceRange.baseMipLevel = 0;
-            imageViewCreateInfo.subresourceRange.levelCount = 1;
+            imageViewCreateInfo.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
             imageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
             imageViewCreateInfo.subresourceRange.layerCount = 1;
-
+            
             VkImageDescriptorInfoEXT imageDescriptorInfo = {};
             imageDescriptorInfo.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT;
             imageDescriptorInfo.pView = &imageViewCreateInfo;
@@ -896,9 +897,9 @@ private:
         samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
 
         samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-        samplerInfo.mipLodBias = 0.0f;
-        samplerInfo.minLod = 0.0f;
-        samplerInfo.maxLod = 0.0f;
+        samplerInfo.mipLodBias = 1.0f;
+        samplerInfo.minLod = 5.0f;
+        samplerInfo.maxLod = VK_REMAINING_MIP_LEVELS;
 
 
         VkHostAddressRangeEXT hostAddressRangesSamplers = {};
@@ -1082,6 +1083,7 @@ private:
     void createImage(
         uint32_t width,
         uint32_t height,
+        uint32_t mipLevels,
         VkFormat format,
         VkImageUsageFlags usage,
         VkImage& image,
@@ -1138,19 +1140,16 @@ private:
 
         VkCommandBuffer cmd = beginSingleTimeCommands();
 
-        VkImageMemoryBarrier2 barrier{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = image,
-            .subresourceRange{
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            },
-        };
+        VkImageMemoryBarrier2 barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = image;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
 
         int32_t mipWidth = static_cast<int32_t>(width);
         int32_t mipHeight = static_cast<int32_t>(height);
@@ -1168,7 +1167,7 @@ private:
             barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
             barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
 
-            VkDependencyInfo dependency = {};
+            VkDependencyInfo dependency{};
             dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
             dependency.imageMemoryBarrierCount = 1;
             dependency.pImageMemoryBarriers = &barrier;
@@ -1231,10 +1230,10 @@ private:
         barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
         barrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
 
-        VkDependencyInfo dependency;
-        dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        dependency.imageMemoryBarrierCount = 1,
-        dependency.pImageMemoryBarriers = &barrier,
+        VkDependencyInfo dependency{};
+        dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        dependency.imageMemoryBarrierCount = 1;
+        dependency.pImageMemoryBarriers = &barrier;
 
         vkCmdPipelineBarrier2(cmd, &dependency);
 
@@ -1275,6 +1274,7 @@ private:
         createImage(
             texWidth,
             texHeight,
+            mipLevels,
             VK_FORMAT_R8G8B8A8_SRGB,
             VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
             textureImage,
@@ -1606,12 +1606,14 @@ private:
             vkCmdPushDataEXT(commandBuffer, &pushDataInfo);
 
 
+            // The reserved range is driver-internal and must not overlap app descriptors,
+            // which are written from offset 0 — so it goes at the tail of the heap.
             VkBindHeapInfoEXT bindHeapinfo{};
             bindHeapinfo.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT;
             bindHeapinfo.heapRange.address = descriptorHeapResourcesAddresses[currentFrame];
             bindHeapinfo.heapRange.size = heapbufferSize;
+            bindHeapinfo.reservedRangeOffset = heapbufferSize - descriptorHeapProperties.minResourceHeapReservedRange;
             bindHeapinfo.reservedRangeSize = descriptorHeapProperties.minResourceHeapReservedRange;
-
             vkCmdBindResourceHeapEXT(commandBuffer, &bindHeapinfo);
 
 
@@ -1619,9 +1621,10 @@ private:
             bindSamplerHeapinfo.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT;
             bindSamplerHeapinfo.heapRange.address = descriptorHeapSamplerAddress;
             bindSamplerHeapinfo.heapRange.size = heapSamplerbufferSize;
+            bindSamplerHeapinfo.reservedRangeOffset = heapSamplerbufferSize - descriptorHeapProperties.minSamplerHeapReservedRange;
             bindSamplerHeapinfo.reservedRangeSize = descriptorHeapProperties.minSamplerHeapReservedRange;
             vkCmdBindSamplerHeapEXT(commandBuffer, &bindSamplerHeapinfo);
-
+            
 
             VkViewport viewport{};
             viewport.x = 0.0f;
